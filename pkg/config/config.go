@@ -106,13 +106,10 @@ type StorageConfig struct {
 
 // AuthConfig holds authentication configuration.
 type AuthConfig struct {
-	Enabled      bool             `yaml:"enabled"`
-	SkipForStdio bool             `yaml:"skip_for_stdio"`
-	GitHub       *GitHubConfig    `yaml:"github,omitempty"`
-	AllowedOrgs  []string         `yaml:"allowed_orgs,omitempty"`
-	Tokens       TokensConfig     `yaml:"tokens"`
-	DatabaseURL  string           `yaml:"database_url,omitempty"`
-	RateLimits   RateLimitsConfig `yaml:"rate_limits"`
+	Enabled     bool          `yaml:"enabled"`
+	GitHub      *GitHubConfig `yaml:"github,omitempty"`
+	AllowedOrgs []string      `yaml:"allowed_orgs,omitempty"`
+	Tokens      TokensConfig  `yaml:"tokens"`
 }
 
 // GitHubConfig holds GitHub OAuth configuration.
@@ -123,15 +120,7 @@ type GitHubConfig struct {
 
 // TokensConfig holds JWT token configuration.
 type TokensConfig struct {
-	AccessTokenTTL  time.Duration `yaml:"access_token_ttl"`
-	RefreshTokenTTL time.Duration `yaml:"refresh_token_ttl"`
-	Issuer          string        `yaml:"issuer"`
-	SecretKey       string        `yaml:"secret_key"`
-}
-
-// RateLimitsConfig holds rate limiting configuration.
-type RateLimitsConfig struct {
-	RequestsPerHour int `yaml:"requests_per_hour"`
+	SecretKey string `yaml:"secret_key"`
 }
 
 // ObservabilityConfig holds observability configuration.
@@ -237,16 +226,6 @@ func applyDefaults(cfg *Config) {
 
 	if cfg.Sandbox.Sessions.MaxSessions == 0 {
 		cfg.Sandbox.Sessions.MaxSessions = 10
-	}
-
-	if cfg.Auth.Tokens.AccessTokenTTL == 0 {
-		cfg.Auth.Tokens.AccessTokenTTL = time.Hour
-	}
-	if cfg.Auth.Tokens.RefreshTokenTTL == 0 {
-		cfg.Auth.Tokens.RefreshTokenTTL = 30 * 24 * time.Hour
-	}
-	if cfg.Auth.RateLimits.RequestsPerHour == 0 {
-		cfg.Auth.RateLimits.RequestsPerHour = 100
 	}
 
 	if cfg.Observability.MetricsPort == 0 {

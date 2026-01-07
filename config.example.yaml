@@ -76,35 +76,23 @@ storage:
   public_url_prefix: "${S3_PUBLIC_URL}"  # e.g., https://outputs.example.com
 
 # Authentication configuration
+# When enabled, requires GitHub OAuth for HTTP transports (SSE, streamable-http).
+# Stdio transport (local/Claude Desktop) never requires auth.
 auth:
   enabled: false  # Set to true to require authentication
-
-  # Skip auth for stdio transport (local development)
-  skip_for_stdio: true
 
   # GitHub OAuth configuration (required when auth.enabled is true)
   # github:
   #   client_id: "${GITHUB_CLIENT_ID}"
   #   client_secret: "${GITHUB_CLIENT_SECRET}"
 
-  # Organizations allowed to access the server
+  # Organizations allowed to access the server (empty = all authenticated users)
   # allowed_orgs:
   #   - "ethpandaops"
-  #   - "ethereum"
 
-  # Token configuration
+  # JWT token configuration
   # tokens:
-  #   access_token_ttl: 3600      # 1 hour
-  #   refresh_token_ttl: 2592000  # 30 days
-  #   issuer: "https://mcp.example.com"
-  #   secret_key: "${JWT_SECRET_KEY}"
-
-  # PostgreSQL database for session storage
-  # database_url: "${DATABASE_URL}"  # e.g., postgresql://user:pass@host:5432/xatu_mcp
-
-  # Rate limiting
-  # rate_limits:
-  #   requests_per_hour: 100
+  #   secret_key: "${JWT_SECRET_KEY}"  # Required when auth is enabled
 
 # Observability configuration
 observability:

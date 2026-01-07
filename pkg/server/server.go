@@ -8,11 +8,13 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 	"github.com/sirupsen/logrus"
 
 	"github.com/ethpandaops/xatu-mcp/internal/version"
+	"github.com/ethpandaops/xatu-mcp/pkg/auth"
 	"github.com/ethpandaops/xatu-mcp/pkg/config"
 	"github.com/ethpandaops/xatu-mcp/pkg/observability"
 	"github.com/ethpandaops/xatu-mcp/pkg/resource"
@@ -39,11 +41,14 @@ type Service interface {
 type service struct {
 	log              logrus.FieldLogger
 	cfg              config.ServerConfig
+	authCfg          config.AuthConfig
 	toolRegistry     tool.Registry
 	resourceRegistry resource.Registry
 	sandbox          sandbox.Service
+	auth             auth.SimpleService
 	mcpServer        *mcpserver.MCPServer
 	sseServer        *mcpserver.SSEServer
+	httpServer       *http.Server
 	mu               sync.Mutex
 	done             chan struct{}
 	running          bool
@@ -53,16 +58,20 @@ type service struct {
 func NewService(
 	log logrus.FieldLogger,
 	cfg config.ServerConfig,
+	authCfg config.AuthConfig,
 	toolRegistry tool.Registry,
 	resourceRegistry resource.Registry,
 	sandboxSvc sandbox.Service,
+	authSvc auth.SimpleService,
 ) Service {
 	return &service{
 		log:              log.WithField("component", "server"),
 		cfg:              cfg,
+		authCfg:          authCfg,
 		toolRegistry:     toolRegistry,
 		resourceRegistry: resourceRegistry,
 		sandbox:          sandboxSvc,
+		auth:             authSvc,
 		done:             make(chan struct{}),
 	}
 }
@@ -80,9 +89,15 @@ func (s *service) Start(ctx context.Context) error {
 	s.mu.Unlock()
 
 	s.log.WithFields(logrus.Fields{
-		"transport": s.cfg.Transport,
-		"version":   version.Version,
+		"transport":    s.cfg.Transport,
+		"version":      version.Version,
+		"auth_enabled": s.auth.Enabled(),
 	}).Info("Starting MCP server")
+
+	// Start auth service if enabled.
+	if err := s.auth.Start(ctx); err != nil {
+		return fmt.Errorf("starting auth service: %w", err)
+	}
 
 	// Create the MCP server
 	s.mcpServer = mcpserver.NewMCPServer(
@@ -126,20 +141,28 @@ func (s *service) Stop() error {
 	close(s.done)
 	s.running = false
 
-	if s.sseServer != nil {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*1e9)
-		defer cancel()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*1e9)
+	defer cancel()
 
+	if s.httpServer != nil {
+		if err := s.httpServer.Shutdown(shutdownCtx); err != nil {
+			s.log.WithError(err).Error("Failed to shutdown HTTP server")
+		}
+	}
+
+	if s.sseServer != nil {
 		if err := s.sseServer.Shutdown(shutdownCtx); err != nil {
 			s.log.WithError(err).Error("Failed to shutdown SSE server")
 		}
 	}
 
-	// Stop the sandbox service
-	if s.sandbox != nil {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*1e9)
-		defer cancel()
+	// Stop auth service.
+	if err := s.auth.Stop(); err != nil {
+		s.log.WithError(err).Error("Failed to stop auth service")
+	}
 
+	// Stop the sandbox service.
+	if s.sandbox != nil {
 		if err := s.sandbox.Stop(shutdownCtx); err != nil {
 			s.log.WithError(err).Error("Failed to stop sandbox service")
 		}
@@ -267,7 +290,10 @@ func (s *service) runStdio(ctx context.Context) error {
 func (s *service) runSSE(ctx context.Context) error {
 	addr := fmt.Sprintf("%s:%d", s.cfg.Host, s.cfg.Port)
 
-	s.log.WithField("address", addr).Info("Running MCP server with SSE transport")
+	s.log.WithFields(logrus.Fields{
+		"address":      addr,
+		"auth_enabled": s.auth.Enabled(),
+	}).Info("Running MCP server with SSE transport")
 
 	opts := []mcpserver.SSEOption{
 		mcpserver.WithKeepAlive(true),
@@ -279,11 +305,18 @@ func (s *service) runSSE(ctx context.Context) error {
 
 	s.sseServer = mcpserver.NewSSEServer(s.mcpServer, opts...)
 
-	// Run in a goroutine
+	// Build HTTP handler with auth.
+	handler := s.buildHTTPHandler(s.sseServer)
+
+	s.httpServer = &http.Server{
+		Addr:    addr,
+		Handler: handler,
+	}
+
 	errCh := make(chan error, 1)
 
 	go func() {
-		errCh <- s.sseServer.Start(addr)
+		errCh <- s.httpServer.ListenAndServe()
 	}()
 
 	observability.ActiveConnections.Inc()
@@ -291,7 +324,7 @@ func (s *service) runSSE(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
-		return s.sseServer.Shutdown(ctx)
+		return s.httpServer.Shutdown(ctx)
 	case <-s.done:
 		return nil
 	case err := <-errCh:
@@ -307,9 +340,12 @@ func (s *service) runSSE(ctx context.Context) error {
 func (s *service) runStreamableHTTP(ctx context.Context) error {
 	addr := fmt.Sprintf("%s:%d", s.cfg.Host, s.cfg.Port)
 
-	s.log.WithField("address", addr).Info("Running MCP server with streamable-http transport")
+	s.log.WithFields(logrus.Fields{
+		"address":      addr,
+		"auth_enabled": s.auth.Enabled(),
+	}).Info("Running MCP server with streamable-http transport")
 
-	// StreamableHTTP uses the same SSE server infrastructure with different settings
+	// StreamableHTTP uses the same SSE server infrastructure with different settings.
 	opts := []mcpserver.SSEOption{
 		mcpserver.WithKeepAlive(true),
 	}
@@ -320,10 +356,18 @@ func (s *service) runStreamableHTTP(ctx context.Context) error {
 
 	s.sseServer = mcpserver.NewSSEServer(s.mcpServer, opts...)
 
+	// Build HTTP handler with auth.
+	handler := s.buildHTTPHandler(s.sseServer)
+
+	s.httpServer = &http.Server{
+		Addr:    addr,
+		Handler: handler,
+	}
+
 	errCh := make(chan error, 1)
 
 	go func() {
-		errCh <- s.sseServer.Start(addr)
+		errCh <- s.httpServer.ListenAndServe()
 	}()
 
 	observability.ActiveConnections.Inc()
@@ -331,7 +375,7 @@ func (s *service) runStreamableHTTP(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
-		return s.sseServer.Shutdown(ctx)
+		return s.httpServer.Shutdown(ctx)
 	case <-s.done:
 		return nil
 	case err := <-errCh:
@@ -341,6 +385,36 @@ func (s *service) runStreamableHTTP(ctx context.Context) error {
 
 		return nil
 	}
+}
+
+// buildHTTPHandler creates an HTTP handler with auth routes and middleware.
+func (s *service) buildHTTPHandler(mcpHandler http.Handler) http.Handler {
+	r := chi.NewRouter()
+
+	// Health endpoints (always public).
+	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	})
+	r.Get("/ready", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ready"))
+	})
+
+	// Mount auth routes (discovery endpoints, OAuth flow).
+	s.auth.MountRoutes(r)
+
+	// Apply auth middleware and mount MCP handler.
+	// Auth middleware handles public vs protected paths.
+	r.Group(func(r chi.Router) {
+		r.Use(s.auth.Middleware())
+		r.Handle("/sse", mcpHandler)
+		r.Handle("/sse/*", mcpHandler)
+		r.Handle("/message", mcpHandler)
+		r.Handle("/message/*", mcpHandler)
+	})
+
+	return r
 }
 
 // Compile-time interface compliance check.

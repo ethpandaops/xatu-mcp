@@ -6,6 +6,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	"github.com/ethpandaops/xatu-mcp/pkg/auth"
 	"github.com/ethpandaops/xatu-mcp/pkg/clickhouse"
 	"github.com/ethpandaops/xatu-mcp/pkg/config"
 	"github.com/ethpandaops/xatu-mcp/pkg/resource"
@@ -69,19 +70,39 @@ func (b *Builder) Build(ctx context.Context) (Service, error) {
 	// Create resource registry and register resources
 	resourceReg := b.buildResourceRegistry(chClient)
 
+	// Create auth service
+	authSvc, err := b.buildAuth()
+	if err != nil {
+		_ = sandboxSvc.Stop(ctx)
+		return nil, fmt.Errorf("building auth service: %w", err)
+	}
+
 	// Create and return the server service (sandbox is passed for lifecycle management)
 	return NewService(
 		b.log,
 		b.cfg.Server,
+		b.cfg.Auth,
 		toolReg,
 		resourceReg,
 		sandboxSvc,
+		authSvc,
 	), nil
 }
 
 // buildSandbox creates the sandbox service.
 func (b *Builder) buildSandbox() (sandbox.Service, error) {
 	return sandbox.New(b.cfg.Sandbox, b.log)
+}
+
+// buildAuth creates the auth service.
+func (b *Builder) buildAuth() (auth.SimpleService, error) {
+	// Build the base URL for auth.
+	baseURL := b.cfg.Server.BaseURL
+	if baseURL == "" {
+		baseURL = fmt.Sprintf("http://%s:%d", b.cfg.Server.Host, b.cfg.Server.Port)
+	}
+
+	return auth.NewSimpleService(b.log, b.cfg.Auth, baseURL)
 }
 
 // buildClickHouse creates the ClickHouse client.
