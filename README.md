@@ -2,6 +2,10 @@
 
 An MCP (Model Context Protocol) server for Ethereum network analytics via [Xatu](https://github.com/ethpandaops/xatu) data.
 
+The overall idea behind this server is to empower agents with an MCP code execution environment (as opposed to just providing a query interface). This allows for improve token usage, and while also enabling more complex tasks to be performed.
+
+Read more here: https://www.anthropic.com/engineering/code-execution-with-mcp
+
 ## Overview
 
 xatu-mcp enables AI assistants to analyze Ethereum blockchain data by providing:
