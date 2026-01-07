@@ -414,11 +414,11 @@ func (s *service) buildHTTPHandler(mcpHandler http.Handler) http.Handler {
 	// Health endpoints (always public).
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	})
 	r.Get("/ready", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ready"))
+		_, _ = w.Write([]byte("ready"))
 	})
 
 	// Mount auth routes (discovery endpoints, OAuth flow).

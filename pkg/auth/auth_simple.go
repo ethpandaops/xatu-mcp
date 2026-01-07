@@ -230,7 +230,7 @@ func (s *simpleService) handleResourceMetadata(w http.ResponseWriter, _ *http.Re
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "max-age=3600")
-	json.NewEncoder(w).Encode(metadata)
+	_ = json.NewEncoder(w).Encode(metadata)
 }
 
 // handleServerMetadata returns RFC 8414 authorization server metadata.
@@ -248,7 +248,7 @@ func (s *simpleService) handleServerMetadata(w http.ResponseWriter, _ *http.Requ
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "max-age=3600")
-	json.NewEncoder(w).Encode(metadata)
+	_ = json.NewEncoder(w).Encode(metadata)
 }
 
 // handleAuthorize starts the OAuth flow.
@@ -465,34 +465,49 @@ func (s *simpleService) handleToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Mark as used only after all checks pass.
-	issued.Used = true
+	// Copy values before releasing lock for validation.
+	// We validate BEFORE marking as used to prevent malformed requests from burning valid codes.
+	issuedClientID := issued.ClientID
+	issuedRedirectURI := issued.RedirectURI
+	issuedResource := issued.Resource
+	issuedCodeChallenge := issued.CodeChallenge
+	issuedGitHubLogin := issued.GitHubLogin
+	issuedGitHubID := issued.GitHubID
+	issuedOrgs := issued.Orgs
 	s.codesMu.Unlock()
 
-	if issued.ClientID != clientID || issued.RedirectURI != redirectURI || issued.Resource != resource {
+	// Validate parameters BEFORE marking as used.
+	if issuedClientID != clientID || issuedRedirectURI != redirectURI || issuedResource != resource {
 		s.writeError(w, http.StatusBadRequest, "invalid_grant", "parameter mismatch")
 		return
 	}
 
-	// Verify PKCE.
-	if !s.verifyPKCE(codeVerifier, issued.CodeChallenge) {
+	// Verify PKCE BEFORE marking as used.
+	if !s.verifyPKCE(codeVerifier, issuedCodeChallenge) {
 		s.writeError(w, http.StatusBadRequest, "invalid_grant", "invalid code_verifier")
 		return
 	}
 
-	// Create JWT.
+	// All validation passed - now mark the code as used.
+	s.codesMu.Lock()
+	if issedCode, ok := s.codes[code]; ok {
+		issedCode.Used = true
+	}
+	s.codesMu.Unlock()
+
+	// Create JWT using the copied values.
 	now := time.Now()
 	claims := &tokenClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    s.baseURL,
-			Subject:   fmt.Sprintf("%d", issued.GitHubID),
-			Audience:  jwt.ClaimStrings{issued.Resource},
+			Subject:   fmt.Sprintf("%d", issuedGitHubID),
+			Audience:  jwt.ClaimStrings{issuedResource},
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(accessTokenTTL)),
 		},
-		GitHubLogin: issued.GitHubLogin,
-		GitHubID:    issued.GitHubID,
-		Orgs:        issued.Orgs,
+		GitHubLogin: issuedGitHubLogin,
+		GitHubID:    issuedGitHubID,
+		Orgs:        issuedOrgs,
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -511,7 +526,7 @@ func (s *simpleService) handleToken(w http.ResponseWriter, r *http.Request) {
 	// Return token response.
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"access_token": accessToken,
 		"token_type":   "Bearer",
 		"expires_in":   int(accessTokenTTL.Seconds()),
@@ -632,7 +647,7 @@ func (s *simpleService) verifyPKCE(verifier, challenge string) bool {
 func (s *simpleService) writeError(w http.ResponseWriter, status int, errCode, description string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"error":             errCode,
 		"error_description": description,
 	})
@@ -641,7 +656,7 @@ func (s *simpleService) writeError(w http.ResponseWriter, status int, errCode, d
 func (s *simpleService) writeHTMLError(w http.ResponseWriter, status int, title, message string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
-	fmt.Fprintf(w, `<!DOCTYPE html><html><head><title>%s</title></head><body><h1>%s</h1><p>%s</p></body></html>`,
+	_, _ = fmt.Fprintf(w, `<!DOCTYPE html><html><head><title>%s</title></head><body><h1>%s</h1><p>%s</p></body></html>`,
 		title, title, message)
 }
 
@@ -651,7 +666,7 @@ func (s *simpleService) writeUnauthorized(w http.ResponseWriter, description str
 		`Bearer resource_metadata="%s/.well-known/oauth-protected-resource", error="invalid_token", error_description="%s"`,
 		s.baseURL, description))
 	w.WriteHeader(http.StatusUnauthorized)
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"error":             "invalid_token",
 		"error_description": description,
 	})

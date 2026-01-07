@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
@@ -156,7 +157,7 @@ func (b *DockerBackend) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 
 // executeEphemeral runs code in a new container that is destroyed after execution.
 func (b *DockerBackend) executeEphemeral(ctx context.Context, req ExecuteRequest) (*ExecutionResult, error) {
-	executionID := uuid.New().String()[:8]
+	executionID := uuid.New().String()
 	timeout := req.Timeout
 
 	if timeout == 0 {
@@ -288,7 +289,7 @@ func (b *DockerBackend) executeWithNewSession(ctx context.Context, req ExecuteRe
 	}
 
 	// Register the session.
-	session, err := b.sessionManager.Create(containerID, req.Env)
+	session, err := b.sessionManager.Create(containerID, req.Env, req.OwnerID)
 	if err != nil {
 		// Cleanup the container if session creation fails.
 		_ = b.forceRemoveContainer(ctx, containerID)
@@ -324,8 +325,8 @@ func (b *DockerBackend) executeInSession(ctx context.Context, req ExecuteRequest
 		"session_id": req.SessionID,
 	})
 
-	// Get the session (this also updates LastUsed).
-	session, err := b.sessionManager.Get(req.SessionID)
+	// Get the session (this also updates LastUsed and verifies ownership).
+	session, err := b.sessionManager.Get(req.SessionID, req.OwnerID)
 	if err != nil {
 		return nil, fmt.Errorf("getting session: %w", err)
 	}
@@ -435,7 +436,7 @@ func (b *DockerBackend) execInContainer(
 	code string,
 	timeout time.Duration,
 ) (*ExecutionResult, error) {
-	executionID := uuid.New().String()[:8]
+	executionID := uuid.New().String()
 	log := b.log.WithFields(logrus.Fields{
 		"execution_id": executionID,
 		"session_id":   session.ID,
@@ -503,6 +504,22 @@ func (b *DockerBackend) execInContainer(
 			log.WithError(err).Warn("Error reading exec output")
 		}
 	case <-execCtx.Done():
+		log.Warn("Execution timed out, cleaning up script file")
+
+		// Cleanup script file even on timeout to prevent disk space leaks.
+		// Use a fresh context since execCtx is cancelled.
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
+
+		cleanupCmd := []string{"rm", "-f", scriptPath}
+		cleanupConfig := container.ExecOptions{
+			Cmd: cleanupCmd,
+		}
+
+		if cleanupResp, err := b.client.ContainerExecCreate(cleanupCtx, session.ContainerID, cleanupConfig); err == nil {
+			_ = b.client.ContainerExecStart(cleanupCtx, cleanupResp.ID, container.ExecStartOptions{})
+		}
+
 		return nil, fmt.Errorf("execution timed out after %s", timeout)
 	}
 
@@ -747,7 +764,7 @@ func (b *DockerBackend) getContainerLogs(ctx context.Context, containerID string
 	if err != nil {
 		return "", "", fmt.Errorf("reading container logs: %w", err)
 	}
-	defer logReader.Close()
+	defer func() { _ = logReader.Close() }()
 
 	var stdout, stderr bytes.Buffer
 	if _, err := stdcopy.StdCopy(&stdout, &stderr, logReader); err != nil {
@@ -813,8 +830,8 @@ func (b *DockerBackend) untrackContainer(executionID string) {
 // forceKillContainer forcefully kills a running container.
 func (b *DockerBackend) forceKillContainer(ctx context.Context, containerID string) error {
 	if err := b.client.ContainerKill(ctx, containerID, "SIGKILL"); err != nil {
-		// Ignore "not running" errors.
-		if !client.IsErrNotFound(err) {
+		// Ignore "not found" errors.
+		if !errdefs.IsNotFound(err) {
 			return fmt.Errorf("killing container: %w", err)
 		}
 	}
@@ -825,7 +842,7 @@ func (b *DockerBackend) forceKillContainer(ctx context.Context, containerID stri
 // forceRemoveContainer forcefully removes a container.
 func (b *DockerBackend) forceRemoveContainer(ctx context.Context, containerID string) error {
 	if err := b.client.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true}); err != nil {
-		if !client.IsErrNotFound(err) {
+		if !errdefs.IsNotFound(err) {
 			return fmt.Errorf("removing container: %w", err)
 		}
 	}
@@ -835,12 +852,12 @@ func (b *DockerBackend) forceRemoveContainer(ctx context.Context, containerID st
 
 // ensureImage ensures the sandbox image is available locally.
 func (b *DockerBackend) ensureImage(ctx context.Context) error {
-	_, _, err := b.client.ImageInspectWithRaw(ctx, b.cfg.Image)
+	_, err := b.client.ImageInspect(ctx, b.cfg.Image)
 	if err == nil {
 		return nil
 	}
 
-	if !client.IsErrNotFound(err) {
+	if !errdefs.IsNotFound(err) {
 		return fmt.Errorf("inspecting image: %w", err)
 	}
 
@@ -851,7 +868,7 @@ func (b *DockerBackend) ensureImage(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("pulling image: %w", err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	// Consume the pull output.
 	if _, err := io.Copy(io.Discard, reader); err != nil {

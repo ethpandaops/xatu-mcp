@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethpandaops/xatu-mcp/pkg/auth"
 	"github.com/ethpandaops/xatu-mcp/pkg/config"
 	"github.com/ethpandaops/xatu-mcp/pkg/sandbox"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -31,8 +32,8 @@ The xatu library is pre-installed for querying Ethereum network data:
 ` + "```python" + `
 from xatu import clickhouse, prometheus, loki, storage
 
-# Query ClickHouse for blockchain data
-df = clickhouse.query("mainnet", "SELECT * FROM beacon_api_eth_v1_events_block LIMIT 10")
+# Query ClickHouse for blockchain data (network, sql, cluster)
+df = clickhouse.query("mainnet", "SELECT * FROM beacon_api_eth_v1_events_block LIMIT 10", cluster="xatu")
 
 # Query Prometheus metrics
 result = prometheus.query("up")
@@ -67,7 +68,7 @@ Example workflow:
 
 ` + "```python" + `
 # In first execution - save data to workspace
-df = clickhouse.query("mainnet", "SELECT * FROM ... LIMIT 1000")
+df = clickhouse.query("mainnet", "SELECT * FROM ... LIMIT 1000", cluster="xatu")
 df.to_parquet('/workspace/data.parquet')
 print("Data saved!")
 
@@ -147,11 +148,19 @@ func newExecutePythonHandler(
 		// Extract optional session_id.
 		sessionID := request.GetString("session_id", "")
 
+		// Extract owner ID from authenticated user context.
+		// This is used to bind sessions to specific users.
+		ownerID := ""
+		if authUser := auth.GetAuthUser(ctx); authUser != nil {
+			ownerID = fmt.Sprintf("%d", authUser.GitHubID)
+		}
+
 		handlerLog.WithFields(logrus.Fields{
 			"code_length": len(code),
 			"timeout":     timeout,
 			"backend":     sandboxSvc.Name(),
 			"session_id":  sessionID,
+			"owner_id":    ownerID,
 		}).Info("Executing Python code")
 
 		// Build environment variables for the sandbox.
@@ -163,6 +172,7 @@ func newExecutePythonHandler(
 			Env:       env,
 			Timeout:   time.Duration(timeout) * time.Second,
 			SessionID: sessionID,
+			OwnerID:   ownerID,
 		})
 		if err != nil {
 			handlerLog.WithError(err).Error("Execution failed")

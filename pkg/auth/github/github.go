@@ -104,7 +104,7 @@ func (c *Client) ExchangeCode(ctx context.Context, code, redirectURI string) (*T
 		return nil, fmt.Errorf("%w: exchanging code: %v", ErrGitHubOAuth, err)
 	}
 
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -185,7 +185,7 @@ func (c *Client) getUserProfile(ctx context.Context, accessToken string) (*githu
 		return nil, fmt.Errorf("%w: fetching user: %v", ErrGitHubAPI, err)
 	}
 
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -225,7 +225,7 @@ func (c *Client) getUserOrganizations(ctx context.Context, accessToken string) (
 		return nil, fmt.Errorf("%w: fetching orgs: %v", ErrGitHubAPI, err)
 	}
 
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

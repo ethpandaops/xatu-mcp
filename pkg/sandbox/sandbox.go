@@ -33,6 +33,9 @@ type ExecuteRequest struct {
 	// SessionID is an optional session ID to reuse a persistent container.
 	// If empty, a new session is created. If provided, the existing session is reused.
 	SessionID string
+	// OwnerID is the GitHub user ID that owns the session.
+	// Required for session creation and verification.
+	OwnerID string
 }
 
 // ExecutionResult contains the output from code execution.

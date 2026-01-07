@@ -74,10 +74,10 @@ func GVisorSecurityConfig(memoryLimit string, cpuLimit float64) (*SecurityConfig
 // ApplyToHostConfig applies security settings to a Docker HostConfig.
 func (s *SecurityConfig) ApplyToHostConfig(hostConfig *container.HostConfig) {
 	// Resource limits.
-	hostConfig.Resources.Memory = s.MemoryLimit
-	hostConfig.Resources.CPUQuota = s.CPUQuota
-	hostConfig.Resources.CPUPeriod = s.CPUPeriod
-	hostConfig.Resources.PidsLimit = &s.PidsLimit
+	hostConfig.Memory = s.MemoryLimit
+	hostConfig.CPUQuota = s.CPUQuota
+	hostConfig.CPUPeriod = s.CPUPeriod
+	hostConfig.PidsLimit = &s.PidsLimit
 
 	// Security hardening.
 	hostConfig.ReadonlyRootfs = s.ReadonlyRootfs

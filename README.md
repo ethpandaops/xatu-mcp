@@ -173,6 +173,7 @@ Python code executes in an isolated Docker container with:
 from xatu import clickhouse, prometheus, loki, storage
 
 # Query ClickHouse for blockchain data
+# Arguments: network, SQL query, cluster name
 df = clickhouse.query("mainnet", """
     SELECT
         slot,
@@ -181,7 +182,7 @@ df = clickhouse.query("mainnet", """
     FROM beacon_api_eth_v1_events_block
     WHERE meta_network_name = 'mainnet'
     LIMIT 10
-""")
+""", cluster="xatu")
 
 # Query Prometheus metrics
 result = prometheus.query("up")

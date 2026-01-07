@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -170,24 +171,35 @@ func Load(path string) (*Config, error) {
 }
 
 // substituteEnvVars replaces ${VAR_NAME} patterns with environment variable values.
+// Lines that are comments (starting with #) are skipped to allow commented optional sections
+// in config files without requiring their environment variables to be set.
 func substituteEnvVars(content string) (string, error) {
 	var missingVars []string
+	lines := strings.Split(content, "\n")
 
-	result := envVarPattern.ReplaceAllStringFunc(content, func(match string) string {
-		varName := envVarPattern.FindStringSubmatch(match)[1]
-		value := os.Getenv(varName)
-		if value == "" {
-			missingVars = append(missingVars, varName)
-			return match
+	for i, line := range lines {
+		// Skip lines that are YAML comments.
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") {
+			continue
 		}
-		return value
-	})
+
+		lines[i] = envVarPattern.ReplaceAllStringFunc(line, func(match string) string {
+			varName := envVarPattern.FindStringSubmatch(match)[1]
+			value := os.Getenv(varName)
+			if value == "" {
+				missingVars = append(missingVars, varName)
+				return match
+			}
+			return value
+		})
+	}
 
 	if len(missingVars) > 0 {
 		return "", fmt.Errorf("missing environment variables: %v", missingVars)
 	}
 
-	return result, nil
+	return strings.Join(lines, "\n"), nil
 }
 
 // applyDefaults sets default values for configuration fields.

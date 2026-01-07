@@ -235,7 +235,7 @@ func downloadImage(ctx context.Context, imageURL string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("fetching URL: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Reject redirects - they could be used for SSRF.
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
