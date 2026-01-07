@@ -68,6 +68,15 @@ from xatu_mcp.auth.middleware import (
     require_authenticated,
     require_scope,
 )
+from xatu_mcp.auth.context import (
+    AuthContext,
+    AuthenticationRequiredError,
+    InsufficientScopeError,
+    clear_auth_context,
+    get_auth_context,
+    require_scope_for_tool,
+    set_auth_context,
+)
 
 __all__ = [
     # Models
@@ -108,4 +117,12 @@ __all__ = [
     "get_current_user",
     "require_authenticated",
     "require_scope",
+    # Context
+    "AuthContext",
+    "AuthenticationRequiredError",
+    "InsufficientScopeError",
+    "clear_auth_context",
+    "get_auth_context",
+    "require_scope_for_tool",
+    "set_auth_context",
 ]

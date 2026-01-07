@@ -57,7 +57,7 @@ _CLUSTERS = {
         "user": os.environ.get("XATU_CBT_CLICKHOUSE_USER", ""),
         "password": os.environ.get("XATU_CBT_CLICKHOUSE_PASSWORD", ""),
         "database": os.environ.get("XATU_CBT_CLICKHOUSE_DATABASE", "default"),
-        "networks": ["mainnet", "sepolia", "holesky"],
+        "networks": ["mainnet", "sepolia", "holesky", "hoodi"],
     },
 }
 
@@ -79,10 +79,41 @@ def _get_cluster_for_network(network: str) -> str:
     """
     for cluster_name, config in _CLUSTERS.items():
         if network in config["networks"]:
+            # Found a cluster that supports this network - check if it's configured
+            if not config["host"]:
+                raise ValueError(
+                    f"Cluster '{cluster_name}' supports network '{network}' but is not configured. "
+                    f"Set {_get_env_var_name(cluster_name, 'HOST')} environment variable."
+                )
             return cluster_name
 
-    # Default to xatu-experimental for unknown networks (devnets)
-    return "xatu-experimental"
+    # Network not found in any cluster
+    available_networks = []
+    for cluster_name, config in _CLUSTERS.items():
+        available_networks.extend(config["networks"])
+
+    raise ValueError(
+        f"Unknown network '{network}'. "
+        f"Available networks: {sorted(set(available_networks))}. "
+        f"Or specify cluster explicitly with cluster='xatu' parameter."
+    )
+
+
+def _get_env_var_name(cluster: str, suffix: str) -> str:
+    """Get the environment variable name for a cluster config.
+
+    Args:
+        cluster: Cluster name (e.g., "xatu", "xatu-experimental").
+        suffix: Config suffix (e.g., "HOST", "PORT").
+
+    Returns:
+        Environment variable name.
+    """
+    if cluster == "xatu":
+        return f"XATU_CLICKHOUSE_{suffix}"
+    else:
+        cluster_part = cluster.upper().replace("-", "_").replace("XATU_", "")
+        return f"XATU_{cluster_part}_CLICKHOUSE_{suffix}"
 
 
 def _get_client(cluster: str) -> clickhouse_connect.driver.Client:
@@ -101,14 +132,14 @@ def _get_client(cluster: str) -> clickhouse_connect.driver.Client:
         return _clients[cluster]
 
     if cluster not in _CLUSTERS:
-        raise ValueError(f"Unknown cluster: {cluster}. Available: {list(_CLUSTERS.keys())}")
+        raise ValueError(f"Unknown cluster: '{cluster}'. Available: {list(_CLUSTERS.keys())}")
 
     config = _CLUSTERS[cluster]
 
     if not config["host"]:
         raise ValueError(
             f"Cluster '{cluster}' not configured. "
-            f"Set XATU{'_' + cluster.upper().replace('-', '_') if cluster != 'xatu' else ''}_CLICKHOUSE_HOST"
+            f"Set {_get_env_var_name(cluster, 'HOST')} environment variable."
         )
 
     secure = config["protocol"] == "https"

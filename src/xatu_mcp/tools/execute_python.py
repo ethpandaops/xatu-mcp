@@ -2,8 +2,8 @@
 
 from typing import Any
 
-from mcp.types import TextContent, Tool
 import structlog
+from mcp.types import TextContent, Tool
 
 from xatu_mcp.config import Config
 from xatu_mcp.sandbox.base import SandboxBackend
@@ -59,10 +59,9 @@ Data stays in the sandbox - Claude only sees stdout and file URLs.""",
                 },
                 "timeout": {
                     "type": "integer",
-                    "description": "Execution timeout in seconds (default: 60, max: 300)",
+                    "description": "Execution timeout in seconds (default: from config, max: 300)",
                     "minimum": 1,
                     "maximum": 300,
-                    "default": 60,
                 },
             },
             "required": ["code"],
@@ -92,7 +91,7 @@ async def handle_execute_python(
     if not code:
         raise ValueError("code is required")
 
-    timeout = arguments.get("timeout", 60)
+    timeout = arguments.get("timeout", config.sandbox.timeout)
     if not isinstance(timeout, int) or timeout < 1 or timeout > 300:
         raise ValueError("timeout must be an integer between 1 and 300 seconds")
 
@@ -105,6 +104,16 @@ async def handle_execute_python(
 
     # Build environment variables for the sandbox
     env = _build_sandbox_env(config)
+
+    # Debug: add info about what we're passing and write to file
+    env["DEBUG_HAS_XATU"] = str(config.clickhouse.xatu is not None)
+    env["DEBUG_HAS_CLICKHOUSE"] = str(config.clickhouse is not None)
+
+    # DEBUG: Write env to a file to trace what's happening
+    with open("/tmp/debug_env.txt", "w") as f:
+        f.write(f"env keys: {list(env.keys())}\n")
+        f.write(f"XATU_CLICKHOUSE_USER: {env.get('XATU_CLICKHOUSE_USER', 'NOT SET')}\n")
+        f.write(f"DEBUG_XATU_USER_FROM_CONFIG: {env.get('DEBUG_XATU_USER_FROM_CONFIG', 'NOT SET')}\n")
 
     try:
         result = await sandbox.execute(code=code, env=env, timeout=timeout)
@@ -136,13 +145,18 @@ async def handle_execute_python(
 
     if result.output_files:
         files_list = "\n".join(f"  - {f}" for f in result.output_files)
-        response_parts.append(f"=== OUTPUT FILES ===\n{files_list}")
+        response_parts.append(
+            f"=== OUTPUT FILES ===\n{files_list}\n"
+            "Note: Use storage.upload('/output/filename') in code to get URLs"
+        )
 
     response_parts.append(f"=== EXIT CODE: {result.exit_code} ===")
+    response_parts.append(f"=== EXECUTION ID: {result.execution_id} ===")
     response_parts.append(f"=== DURATION: {result.duration_seconds:.2f}s ===")
 
     logger.info(
         "Execution completed",
+        execution_id=result.execution_id,
         exit_code=result.exit_code,
         duration=result.duration_seconds,
         output_files=result.output_files,
@@ -165,7 +179,13 @@ def _build_sandbox_env(config: Config) -> dict[str, str]:
     Returns:
         Dictionary of environment variables.
     """
+    import sys
     env: dict[str, str] = {}
+
+    # Debug: always add special env vars to trace the value
+    env["DEBUG_XATU_USER_FROM_CONFIG"] = str(config.clickhouse.xatu.user if config.clickhouse.xatu else "NONE")
+    env["DEBUG_CONFIG_ID"] = str(id(config))
+    env["DEBUG_HAS_XATU_IN_BUILD"] = str(config.clickhouse.xatu is not None)
 
     # ClickHouse clusters
     if config.clickhouse.xatu:

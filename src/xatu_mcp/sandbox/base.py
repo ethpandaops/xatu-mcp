@@ -12,6 +12,7 @@ class ExecutionResult:
     stdout: str
     stderr: str
     exit_code: int
+    execution_id: str = ""
     output_files: list[str] = field(default_factory=list)
     metrics: dict[str, Any] = field(default_factory=dict)
     duration_seconds: float = 0.0
@@ -41,6 +42,7 @@ class SandboxBackend(ABC):
         memory_limit: str,
         cpu_limit: float,
         network: str,
+        host_shared_path: str | None = None,
     ) -> None:
         """Initialize the sandbox backend.
 
@@ -50,12 +52,14 @@ class SandboxBackend(ABC):
             memory_limit: Memory limit (e.g., "2g", "512m").
             cpu_limit: CPU limit as a float (e.g., 1.0 = 1 CPU).
             network: Docker network to attach the container to.
+            host_shared_path: Path on Docker host for shared files (for Docker-in-Docker).
         """
         self.image = image
         self.timeout = timeout
         self.memory_limit = memory_limit
         self.cpu_limit = cpu_limit
         self.network = network
+        self.host_shared_path = host_shared_path
 
     @abstractmethod
     async def execute(

@@ -37,8 +37,9 @@ class GVisorBackend(SandboxBackend):
         memory_limit: str,
         cpu_limit: float,
         network: str,
+        host_shared_path: str | None = None,
     ) -> None:
-        super().__init__(image, timeout, memory_limit, cpu_limit, network)
+        super().__init__(image, timeout, memory_limit, cpu_limit, network, host_shared_path)
         self._client: docker.DockerClient | None = None
         self._active_containers: dict[str, docker.models.containers.Container] = {}
         self._lock = threading.Lock()  # Thread-safe access to _active_containers
@@ -125,8 +126,11 @@ class GVisorBackend(SandboxBackend):
             tmpdir_path = Path(tmpdir)
             shared_dir = tmpdir_path / "shared"
             output_dir = tmpdir_path / "output"
-            shared_dir.mkdir()
-            output_dir.mkdir()
+            # Set permissions so 'nobody' user can access these directories
+            # shared_dir: 0755 (readable by nobody)
+            # output_dir: 0777 (writable by nobody)
+            shared_dir.mkdir(mode=0o755)
+            output_dir.mkdir(mode=0o777)
 
             # Write the code to a file
             script_path = shared_dir / "script.py"
@@ -134,6 +138,12 @@ class GVisorBackend(SandboxBackend):
 
             # Build environment variables
             container_env = env.copy() if env else {}
+
+            # Set HOME and cache directories to /tmp for 'nobody' user
+            # This allows libraries like matplotlib to write their config/cache
+            container_env.setdefault("HOME", "/tmp")
+            container_env.setdefault("MPLCONFIGDIR", "/tmp")
+            container_env.setdefault("XDG_CACHE_HOME", "/tmp")
 
             # Build volume mounts
             volumes = {
@@ -172,7 +182,7 @@ class GVisorBackend(SandboxBackend):
                 )
                 raise TimeoutError(f"Execution timed out after {execution_timeout}s")
 
-            # Collect output files
+            # Collect output files (note: S3 uploads are done by user code via xatu.storage)
             output_files = []
             for f in output_dir.iterdir():
                 if f.is_file() and not f.name.startswith("."):
@@ -193,6 +203,7 @@ class GVisorBackend(SandboxBackend):
                 stdout=result["stdout"],
                 stderr=result["stderr"],
                 exit_code=result["exit_code"],
+                execution_id=execution_id,
                 output_files=output_files,
                 metrics=metrics,
                 duration_seconds=result["duration"],

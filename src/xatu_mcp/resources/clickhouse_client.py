@@ -54,6 +54,10 @@ class ClickHouseClusterInfo:
 # Cluster registry - populated at runtime from config
 _clusters: dict[str, ClickHouseClusterInfo] = {}
 
+# Public alias for read access (e.g., CLUSTERS.keys() for listing available cluster names)
+# Note: Prefer using get_cluster() or list_clusters() functions for type-safe access
+CLUSTERS = _clusters
+
 
 def register_clusters_from_config(config: "Config") -> None:  # noqa: F821
     """Register clusters from configuration.

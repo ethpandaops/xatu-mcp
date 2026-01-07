@@ -8,19 +8,17 @@
 
 FROM python:3.11-slim AS builder
 
-# Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app
 
-# Copy project files
-COPY pyproject.toml .
+# Copy project files (including README.md required by pyproject.toml)
+COPY pyproject.toml README.md ./
 COPY src/ src/
 
-# Install the package
-RUN pip install --no-cache-dir .
+# Install the package using uv
+RUN uv pip install --system --no-cache .
 
 # Runtime image
 FROM python:3.11-slim
@@ -55,8 +53,8 @@ EXPOSE 8080 9090
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8080/health || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')" || exit 1
 
-# Default command - start with streamable HTTP
+# Default command - start with SSE transport
 ENTRYPOINT ["xatu-mcp"]
-CMD ["serve", "--transport", "streamable-http"]
+CMD ["serve", "--transport", "sse"]

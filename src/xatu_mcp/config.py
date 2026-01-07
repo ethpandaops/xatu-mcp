@@ -53,6 +53,9 @@ class SandboxConfig(BaseModel):
     memory_limit: str = "2g"
     cpu_limit: float = 1.0
     network: str = "mcp-internal"
+    # Host path for shared files when running Docker-in-Docker
+    # This path must be accessible from the Docker host, not the container
+    host_shared_path: str | None = None
 
 
 class StorageConfig(BaseModel):

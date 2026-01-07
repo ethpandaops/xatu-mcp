@@ -34,8 +34,9 @@ class DockerBackend(SandboxBackend):
         memory_limit: str,
         cpu_limit: float,
         network: str,
+        host_shared_path: str | None = None,
     ) -> None:
-        super().__init__(image, timeout, memory_limit, cpu_limit, network)
+        super().__init__(image, timeout, memory_limit, cpu_limit, network, host_shared_path)
         self._client: docker.DockerClient | None = None
         self._active_containers: dict[str, docker.models.containers.Container] = {}
         self._lock = threading.Lock()  # Thread-safe access to _active_containers
@@ -93,25 +94,54 @@ class DockerBackend(SandboxBackend):
         execution_timeout = timeout or self.timeout
         execution_id = str(uuid.uuid4())[:EXECUTION_ID_LENGTH]
 
-        # Create temp directories for shared files and output
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmpdir_path = Path(tmpdir)
-            shared_dir = tmpdir_path / "shared"
-            output_dir = tmpdir_path / "output"
-            shared_dir.mkdir()
-            output_dir.mkdir()
+        # Determine base path for execution files
+        # When host_shared_path is set (Docker-in-Docker), use it for volume mounts
+        # Otherwise use a temp directory (direct Docker execution)
+        if self.host_shared_path:
+            # Docker-in-Docker mode: use host-visible path
+            base_path = Path(self.host_shared_path) / execution_id
+            base_path.mkdir(parents=True, exist_ok=True)
+            cleanup_path = base_path
+            # For volume mounts, use the host path
+            host_base_path = Path(self.host_shared_path) / execution_id
+        else:
+            # Direct mode: use temp directory
+            base_path = Path(tempfile.mkdtemp())
+            cleanup_path = base_path
+            host_base_path = base_path
+
+        try:
+            shared_dir = base_path / "shared"
+            output_dir = base_path / "output"
+            # Set permissions so 'nobody' user can access these directories
+            shared_dir.mkdir(mode=0o755, exist_ok=True)
+            output_dir.mkdir(mode=0o777, exist_ok=True)
 
             # Write the code to a file
             script_path = shared_dir / "script.py"
             script_path.write_text(code)
+            # Make script readable by nobody
+            script_path.chmod(0o644)
 
             # Build environment variables
             container_env = env.copy() if env else {}
+            # Set HOME and cache directories to /tmp for 'nobody' user
+            container_env.setdefault("HOME", "/tmp")
+            container_env.setdefault("MPLCONFIGDIR", "/tmp")
+            container_env.setdefault("XDG_CACHE_HOME", "/tmp")
 
-            # Build volume mounts
+            # Debug: log env being passed
+            import sys
+            print(f"DEBUG DockerBackend.execute: env_keys={list(container_env.keys())}", file=sys.stderr, flush=True)
+            print(f"DEBUG DockerBackend.execute: xatu_user={container_env.get('XATU_CLICKHOUSE_USER', 'NOT_IN_ENV')}", file=sys.stderr, flush=True)
+            print(f"DEBUG DockerBackend.execute: debug_user={container_env.get('DEBUG_XATU_USER_FROM_CONFIG', 'NOT_IN_ENV')}", file=sys.stderr, flush=True)
+
+            # Build volume mounts using host-visible paths
+            host_shared_dir = host_base_path / "shared"
+            host_output_dir = host_base_path / "output"
             volumes = {
-                str(shared_dir): {"bind": "/shared", "mode": "ro"},
-                str(output_dir): {"bind": "/output", "mode": "rw"},
+                str(host_shared_dir): {"bind": "/shared", "mode": "ro"},
+                str(host_output_dir): {"bind": "/output", "mode": "rw"},
             }
 
             logger.debug(
@@ -119,6 +149,7 @@ class DockerBackend(SandboxBackend):
                 execution_id=execution_id,
                 image=self.image,
                 timeout=execution_timeout,
+                host_shared_path=self.host_shared_path,
             )
 
             try:
@@ -141,7 +172,7 @@ class DockerBackend(SandboxBackend):
                 logger.warning("Container execution timed out", execution_id=execution_id)
                 raise TimeoutError(f"Execution timed out after {execution_timeout}s")
 
-            # Collect output files
+            # Collect output files (note: S3 uploads are done by user code via xatu.storage)
             output_files = []
             for f in output_dir.iterdir():
                 if f.is_file() and not f.name.startswith("."):
@@ -162,10 +193,18 @@ class DockerBackend(SandboxBackend):
                 stdout=result["stdout"],
                 stderr=result["stderr"],
                 exit_code=result["exit_code"],
+                execution_id=execution_id,
                 output_files=output_files,
                 metrics=metrics,
                 duration_seconds=result["duration"],
             )
+        finally:
+            # Clean up the execution directory
+            import shutil
+            try:
+                shutil.rmtree(cleanup_path)
+            except Exception as e:
+                logger.warning("Failed to cleanup execution dir", path=str(cleanup_path), error=str(e))
 
     def _run_container(
         self,
