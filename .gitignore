@@ -1,29 +1,10 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
+# Binaries
+xatu-mcp
+xatu-mcp-linux-*
+*.exe
 
-# Virtual environments
-.venv/
-venv/
-ENV/
+# Go
+vendor/
 
 # IDE
 .idea/
@@ -33,17 +14,9 @@ ENV/
 *~
 
 # Testing
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-.nox/
-
-# MyPy
-.mypy_cache/
-
-# Ruff
-.ruff_cache/
+coverage.out
+coverage.html
+*.test
 
 # Config files with secrets
 config.yaml
@@ -61,3 +34,6 @@ Thumbs.db
 /output/
 /shared/
 *.log
+
+# Sandbox temp files
+/tmp/

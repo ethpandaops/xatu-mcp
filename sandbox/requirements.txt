@@ -1,22 +1,29 @@
 # Core data analysis libraries
-pandas>=2.0.0
-numpy>=1.24.0
-polars>=1.0.0
+pandas>=2.2.0
+numpy>=2.0.0
+polars>=1.20.0
+scipy>=1.14.0
 
 # Visualization
-matplotlib>=3.8.0
+matplotlib>=3.9.0
 seaborn>=0.13.0
-plotly>=5.18.0
+plotly>=5.24.0
+altair>=5.4.0
+vl-convert-python>=1.7.0  # For Altair PNG/SVG export
+bokeh>=3.6.0
+kaleido>=0.2.1  # For Plotly image export
 
 # ClickHouse client
-clickhouse-connect>=0.7.0
+clickhouse-connect>=0.8.0
 
 # HTTP client for Prometheus/Loki
-httpx>=0.27.0
+httpx>=0.28.0
 
 # S3 client
 boto3>=1.35.0
 
 # Utilities
-python-dateutil>=2.8.0
-pytz>=2024.1
+python-dateutil>=2.9.0
+pytz>=2024.2
+rich>=13.9.0  # For better terminal output
+tabulate>=0.9.0  # For table formatting

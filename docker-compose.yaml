@@ -10,7 +10,6 @@
 #   CLICKHOUSE_PASSWORD - ClickHouse password
 #
 # Optional environment variables (with defaults):
-#   POSTGRES_PASSWORD   - PostgreSQL password (default: xatu_mcp_dev)
 #   MINIO_ACCESS_KEY    - MinIO access key (default: minioadmin)
 #   MINIO_SECRET_KEY    - MinIO secret key (default: minioadmin)
 
@@ -19,6 +18,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        - VERSION=${VERSION:-dev}
+        - GIT_COMMIT=${GIT_COMMIT:-unknown}
+        - BUILD_TIME=${BUILD_TIME:-unknown}
     ports:
       - "8080:8080"   # MCP server
       - "9090:9090"   # Metrics
@@ -39,28 +42,8 @@ services:
       - mcp-external
       - mcp-internal
     depends_on:
-      postgres:
-        condition: service_healthy
       minio:
         condition: service_healthy
-    restart: unless-stopped
-
-  # PostgreSQL for session storage (auth)
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: xatu_mcp
-      POSTGRES_USER: xatu
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-xatu_mcp_dev}
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    networks:
-      - mcp-internal
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U xatu -d xatu_mcp"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
     restart: unless-stopped
 
   # MinIO for S3-compatible storage
@@ -106,13 +89,11 @@ networks:
   mcp-external:
     driver: bridge
 
-  # Internal network - no internet access, for sandbox containers
+  # Internal network - for sandbox containers
   mcp-internal:
     driver: bridge
     internal: true
 
 volumes:
-  postgres-data:
   minio-data:
-  mcp-shared:
   mcp-output:

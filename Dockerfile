@@ -6,54 +6,58 @@
 # Run:
 #   docker run -p 8080:8080 -v /var/run/docker.sock:/var/run/docker.sock xatu-mcp:latest
 
-FROM python:3.11-slim AS builder
+# Build stage
+FROM golang:1.24-alpine AS builder
 
-# Install uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+RUN apk add --no-cache git ca-certificates
 
 WORKDIR /app
 
-# Copy project files (including README.md required by pyproject.toml)
-COPY pyproject.toml README.md ./
-COPY src/ src/
+# Copy go mod files first for layer caching
+COPY go.mod go.sum ./
+RUN go mod download
 
-# Install the package using uv
-RUN uv pip install --system --no-cache .
+# Copy source code
+COPY cmd/ cmd/
+COPY pkg/ pkg/
+COPY internal/ internal/
 
-# Runtime image
-FROM python:3.11-slim
+# Build with version info
+ARG VERSION=dev
+ARG GIT_COMMIT=unknown
+ARG BUILD_TIME=unknown
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    docker.io \
-    && rm -rf /var/lib/apt/lists/*
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags="-s -w -X github.com/ethpandaops/xatu-mcp/internal/version.Version=${VERSION} \
+    -X github.com/ethpandaops/xatu-mcp/internal/version.GitCommit=${GIT_COMMIT} \
+    -X github.com/ethpandaops/xatu-mcp/internal/version.BuildTime=${BUILD_TIME}" \
+    -o xatu-mcp ./cmd/xatu-mcp
+
+# Runtime stage
+FROM alpine:3.19
+
+# Install runtime dependencies for Docker access and health checks
+RUN apk add --no-cache ca-certificates docker-cli netcat-openbsd
 
 # Create non-root user
-RUN useradd -m -s /bin/bash xatu && \
-    usermod -aG docker xatu
+RUN adduser -D -s /bin/sh xatu && \
+    addgroup xatu docker 2>/dev/null || true
 
 WORKDIR /app
 
-# Copy installed packages from builder
-COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
-COPY --from=builder /usr/local/bin/xatu-mcp /usr/local/bin/xatu-mcp
-
-# Copy source for reference
-COPY --from=builder /app/src /app/src
+# Copy binary from builder
+COPY --from=builder /app/xatu-mcp /usr/local/bin/xatu-mcp
 
 # Create directories
 RUN mkdir -p /config /shared /output && \
     chown -R xatu:xatu /app /config /shared /output
 
-# Switch to non-root user (commented out for docker socket access)
-# USER xatu
-
 # Expose ports
 EXPOSE 8080 9090
 
-# Health check
+# Health check - verify the MCP server port is accepting connections
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')" || exit 1
+    CMD nc -z localhost 8080 || exit 1
 
 # Default command - start with SSE transport
 ENTRYPOINT ["xatu-mcp"]

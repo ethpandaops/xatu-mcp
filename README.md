@@ -43,16 +43,28 @@ xatu-mcp enables AI assistants to analyze Ethereum blockchain data by providing:
 
 ## Installation
 
+### From Source
+
 ```bash
 # Clone the repository
 git clone https://github.com/ethpandaops/xatu-mcp.git
 cd xatu-mcp
 
-# Install with uv (recommended)
-uv sync
+# Build
+make build
 
-# Or with pip
-pip install -e .
+# Or with Go directly
+go build -o xatu-mcp ./cmd/xatu-mcp
+```
+
+### Docker
+
+```bash
+# Build Docker image
+make docker
+
+# Or directly
+docker build -t xatu-mcp:latest .
 ```
 
 ## Configuration
@@ -104,8 +116,7 @@ docker-compose up -d
 
 This starts:
 - MCP server on port 8080
-- PostgreSQL for session storage
-- MinIO for S3-compatible storage
+- MinIO for S3-compatible storage (ports 9000/9001)
 
 ### Claude Desktop Integration
 
@@ -115,7 +126,7 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 {
   "mcpServers": {
     "xatu": {
-      "command": "xatu-mcp",
+      "command": "/path/to/xatu-mcp",
       "args": ["serve"],
       "env": {
         "CONFIG_PATH": "/path/to/config.yaml",
@@ -125,6 +136,19 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
     }
   }
 }
+```
+
+### Schema Management
+
+```bash
+# List configured clusters
+xatu-mcp schema list
+
+# Refresh schema cache
+xatu-mcp schema refresh
+
+# Refresh specific cluster as JSON
+xatu-mcp schema refresh --cluster xatu --format json
 ```
 
 ## Sandbox Environment
@@ -196,44 +220,48 @@ auth:
 
 Prometheus metrics are exposed on port 9090 (configurable):
 
-```yaml
-observability:
-  metrics_enabled: true
-  metrics_port: 9090
-```
+- `xatu_mcp_tool_calls_total` - Total tool calls by tool name and status
+- `xatu_mcp_tool_call_duration_seconds` - Tool call duration histogram
+- `xatu_mcp_sandbox_executions_total` - Sandbox executions by backend and status
+- `xatu_mcp_sandbox_duration_seconds` - Sandbox execution duration histogram
+- `xatu_mcp_clickhouse_queries_total` - ClickHouse queries by cluster and status
+- `xatu_mcp_active_connections` - Current active MCP connections
 
-### Tracing
+### Health Endpoints
 
-OpenTelemetry tracing is supported:
-
-```yaml
-observability:
-  tracing_enabled: true
-  otlp_endpoint: "${OTLP_ENDPOINT}"
-```
+- `GET /health` - Health check
+- `GET /ready` - Readiness check
+- `GET /metrics` - Prometheus metrics
 
 ## Development
 
 ```bash
-# Install dev dependencies
-uv sync --all-extras
+# Build
+make build
 
 # Run tests
-pytest
+make test
 
-# Lint and format
-ruff check .
-ruff format .
+# Run linters
+make lint
 
-# Type check
-mypy src/
+# Format code
+make fmt
+
+# Build Docker image
+make docker
+
+# Run with SSE transport
+make run-sse
 ```
 
 ### Building the Sandbox Image
 
 ```bash
-cd sandbox
-docker build -t xatu-mcp-sandbox:latest .
+make docker-sandbox
+
+# Or directly
+docker build -t xatu-mcp-sandbox:latest ./sandbox
 ```
 
 ## Architecture

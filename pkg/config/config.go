@@ -1,0 +1,257 @@
+// Package config provides configuration loading for xatu-mcp.
+package config
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"regexp"
+	"time"
+
+	"gopkg.in/yaml.v3"
+)
+
+// Config is the main configuration structure.
+type Config struct {
+	Server        ServerConfig        `yaml:"server"`
+	ClickHouse    ClickHouseConfig    `yaml:"clickhouse"`
+	Prometheus    *PrometheusConfig   `yaml:"prometheus,omitempty"`
+	Loki          *LokiConfig         `yaml:"loki,omitempty"`
+	Sandbox       SandboxConfig       `yaml:"sandbox"`
+	Storage       *StorageConfig      `yaml:"storage,omitempty"`
+	Auth          AuthConfig          `yaml:"auth"`
+	Observability ObservabilityConfig `yaml:"observability"`
+}
+
+// ServerConfig holds server-specific configuration.
+type ServerConfig struct {
+	Host      string `yaml:"host"`
+	Port      int    `yaml:"port"`
+	BaseURL   string `yaml:"base_url"`
+	Transport string `yaml:"transport"`
+}
+
+// ClickHouseConfig holds all ClickHouse cluster configurations.
+type ClickHouseConfig struct {
+	Xatu             *ClusterConfig `yaml:"xatu,omitempty"`
+	XatuExperimental *ClusterConfig `yaml:"xatu-experimental,omitempty"`
+	XatuCBT          *ClusterConfig `yaml:"xatu-cbt,omitempty"`
+}
+
+// ClusterConfig holds configuration for a single ClickHouse cluster.
+type ClusterConfig struct {
+	Host     string   `yaml:"host"`
+	Port     int      `yaml:"port"`
+	Protocol string   `yaml:"protocol"`
+	User     string   `yaml:"user"`
+	Password string   `yaml:"password"`
+	Database string   `yaml:"database"`
+	Networks []string `yaml:"networks,omitempty"`
+}
+
+// PrometheusConfig holds Prometheus configuration.
+type PrometheusConfig struct {
+	URL string `yaml:"url"`
+}
+
+// LokiConfig holds Loki configuration.
+type LokiConfig struct {
+	URL string `yaml:"url"`
+}
+
+// SandboxConfig holds sandbox execution configuration.
+type SandboxConfig struct {
+	Backend        string  `yaml:"backend"`
+	Image          string  `yaml:"image"`
+	Timeout        int     `yaml:"timeout"`
+	MemoryLimit    string  `yaml:"memory_limit"`
+	CPULimit       float64 `yaml:"cpu_limit"`
+	Network        string  `yaml:"network"`
+	HostSharedPath string  `yaml:"host_shared_path,omitempty"`
+}
+
+// StorageConfig holds S3 storage configuration.
+type StorageConfig struct {
+	Endpoint        string `yaml:"endpoint"`
+	AccessKey       string `yaml:"access_key"`
+	SecretKey       string `yaml:"secret_key"`
+	Bucket          string `yaml:"bucket"`
+	Region          string `yaml:"region"`
+	PublicURLPrefix string `yaml:"public_url_prefix,omitempty"`
+}
+
+// AuthConfig holds authentication configuration.
+type AuthConfig struct {
+	Enabled      bool             `yaml:"enabled"`
+	SkipForStdio bool             `yaml:"skip_for_stdio"`
+	GitHub       *GitHubConfig    `yaml:"github,omitempty"`
+	AllowedOrgs  []string         `yaml:"allowed_orgs,omitempty"`
+	Tokens       TokensConfig     `yaml:"tokens"`
+	DatabaseURL  string           `yaml:"database_url,omitempty"`
+	RateLimits   RateLimitsConfig `yaml:"rate_limits"`
+}
+
+// GitHubConfig holds GitHub OAuth configuration.
+type GitHubConfig struct {
+	ClientID     string `yaml:"client_id"`
+	ClientSecret string `yaml:"client_secret"`
+}
+
+// TokensConfig holds JWT token configuration.
+type TokensConfig struct {
+	AccessTokenTTL  time.Duration `yaml:"access_token_ttl"`
+	RefreshTokenTTL time.Duration `yaml:"refresh_token_ttl"`
+	Issuer          string        `yaml:"issuer"`
+	SecretKey       string        `yaml:"secret_key"`
+}
+
+// RateLimitsConfig holds rate limiting configuration.
+type RateLimitsConfig struct {
+	RequestsPerHour int `yaml:"requests_per_hour"`
+}
+
+// ObservabilityConfig holds observability configuration.
+type ObservabilityConfig struct {
+	MetricsEnabled bool   `yaml:"metrics_enabled"`
+	MetricsPort    int    `yaml:"metrics_port"`
+	TracingEnabled bool   `yaml:"tracing_enabled"`
+	OTLPEndpoint   string `yaml:"otlp_endpoint,omitempty"`
+}
+
+// envVarPattern matches ${VAR_NAME} patterns for environment variable substitution.
+var envVarPattern = regexp.MustCompile(`\$\{([^}]+)\}`)
+
+// Load loads configuration from a YAML file with environment variable substitution.
+func Load(path string) (*Config, error) {
+	if path == "" {
+		path = os.Getenv("CONFIG_PATH")
+		if path == "" {
+			path = "config.yaml"
+		}
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading config file %s: %w", path, err)
+	}
+
+	// Substitute environment variables
+	substituted, err := substituteEnvVars(string(data))
+	if err != nil {
+		return nil, fmt.Errorf("substituting env vars: %w", err)
+	}
+
+	var cfg Config
+	if err := yaml.Unmarshal([]byte(substituted), &cfg); err != nil {
+		return nil, fmt.Errorf("parsing config: %w", err)
+	}
+
+	// Apply defaults
+	applyDefaults(&cfg)
+
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("validating config: %w", err)
+	}
+
+	return &cfg, nil
+}
+
+// substituteEnvVars replaces ${VAR_NAME} patterns with environment variable values.
+func substituteEnvVars(content string) (string, error) {
+	var missingVars []string
+
+	result := envVarPattern.ReplaceAllStringFunc(content, func(match string) string {
+		varName := envVarPattern.FindStringSubmatch(match)[1]
+		value := os.Getenv(varName)
+		if value == "" {
+			missingVars = append(missingVars, varName)
+			return match
+		}
+		return value
+	})
+
+	if len(missingVars) > 0 {
+		return "", fmt.Errorf("missing environment variables: %v", missingVars)
+	}
+
+	return result, nil
+}
+
+// applyDefaults sets default values for configuration fields.
+func applyDefaults(cfg *Config) {
+	if cfg.Server.Host == "" {
+		cfg.Server.Host = "0.0.0.0"
+	}
+	if cfg.Server.Port == 0 {
+		cfg.Server.Port = 8080
+	}
+	if cfg.Server.Transport == "" {
+		cfg.Server.Transport = "stdio"
+	}
+
+	if cfg.Sandbox.Backend == "" {
+		cfg.Sandbox.Backend = "docker"
+	}
+	if cfg.Sandbox.Timeout == 0 {
+		cfg.Sandbox.Timeout = 60
+	}
+	if cfg.Sandbox.MemoryLimit == "" {
+		cfg.Sandbox.MemoryLimit = "2g"
+	}
+	if cfg.Sandbox.CPULimit == 0 {
+		cfg.Sandbox.CPULimit = 1.0
+	}
+
+	if cfg.Auth.Tokens.AccessTokenTTL == 0 {
+		cfg.Auth.Tokens.AccessTokenTTL = time.Hour
+	}
+	if cfg.Auth.Tokens.RefreshTokenTTL == 0 {
+		cfg.Auth.Tokens.RefreshTokenTTL = 30 * 24 * time.Hour
+	}
+	if cfg.Auth.RateLimits.RequestsPerHour == 0 {
+		cfg.Auth.RateLimits.RequestsPerHour = 100
+	}
+
+	if cfg.Observability.MetricsPort == 0 {
+		cfg.Observability.MetricsPort = 9090
+	}
+}
+
+// Validate validates the configuration.
+func (c *Config) Validate() error {
+	if c.Sandbox.Image == "" {
+		return errors.New("sandbox.image is required")
+	}
+
+	if c.Auth.Enabled {
+		if c.Auth.GitHub == nil {
+			return errors.New("github configuration is required when auth is enabled")
+		}
+		if c.Auth.GitHub.ClientID == "" {
+			return errors.New("github.client_id is required when auth is enabled")
+		}
+		if c.Auth.GitHub.ClientSecret == "" {
+			return errors.New("github.client_secret is required when auth is enabled")
+		}
+		if c.Auth.Tokens.SecretKey == "" {
+			return errors.New("tokens.secret_key is required when auth is enabled")
+		}
+	}
+
+	return nil
+}
+
+// ToClusters converts ClickHouseConfig to a map of cluster names to configs.
+func (c *ClickHouseConfig) ToClusters() map[string]*ClusterConfig {
+	clusters := make(map[string]*ClusterConfig, 3)
+	if c.Xatu != nil {
+		clusters["xatu"] = c.Xatu
+	}
+	if c.XatuExperimental != nil {
+		clusters["xatu-experimental"] = c.XatuExperimental
+	}
+	if c.XatuCBT != nil {
+		clusters["xatu-cbt"] = c.XatuCBT
+	}
+	return clusters
+}
