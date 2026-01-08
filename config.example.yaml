@@ -5,56 +5,22 @@
 server:
   host: "0.0.0.0"
   port: 8080
-  base_url: "http://localhost:8080"  # Used for OAuth callbacks
+  base_url: "http://localhost:8080"
 
-# ClickHouse clusters configuration
-# Each cluster contains raw or aggregated Ethereum network data
-clickhouse:
-  # Production raw data cluster
-  xatu:
-    host: "clickhouse.xatu.ethpandaops.io"
-    port: 443
-    protocol: "https"
-    user: "${CLICKHOUSE_USER}"
-    password: "${CLICKHOUSE_PASSWORD}"
-    database: "default"
-    networks:
-      - mainnet
-      - sepolia
-      - holesky
-      - hoodi
+# Grafana configuration
+# All data queries (ClickHouse, Prometheus, Loki) are proxied through Grafana.
+# This simplifies credential management - you only need a single Grafana service token.
+grafana:
+  url: "${GRAFANA_URL}"  # e.g., https://grafana.ethpandaops.io
+  service_token: "${GRAFANA_SERVICE_TOKEN}"  # Service account token with datasource:read and datasource:query permissions
+  timeout: 120  # seconds
 
-  # Experimental/devnet raw data cluster
-  xatu-experimental:
-    host: "clickhouse.xatu-experimental.ethpandaops.io"
-    port: 443
-    protocol: "https"
-    user: "${CLICKHOUSE_USER}"
-    password: "${CLICKHOUSE_PASSWORD}"
-    database: "default"
-    networks:
-      - pectra-devnet-6
-
-  # Aggregated/CBT tables cluster
-  xatu-cbt:
-    host: "clickhouse-cbt.xatu.ethpandaops.io"
-    port: 443
-    protocol: "https"
-    user: "${CLICKHOUSE_USER}"
-    password: "${CLICKHOUSE_PASSWORD}"
-    database: "default"
-    networks:
-      - mainnet
-      - sepolia
-      - holesky
-
-# Prometheus configuration (optional)
-# prometheus:
-#   url: "${PROMETHEUS_URL}"
-
-# Loki configuration (optional)
-# loki:
-#   url: "${LOKI_URL}"
+  # Optional: limit which datasources are exposed
+  # If empty, all accessible datasources are available
+  # datasource_uids:
+  #   - "clickhouse-xatu"
+  #   - "prometheus-main"
+  #   - "loki-main"
 
 # Sandbox configuration
 sandbox:
@@ -65,6 +31,14 @@ sandbox:
   memory_limit: "2g"
   cpu_limit: 1.0
   network: "mcp-internal"
+
+  # Session configuration (optional)
+  # When enabled, sandbox containers persist between calls
+  # session:
+  #   enabled: true
+  #   ttl: 10m        # idle timeout
+  #   max_duration: 1h  # absolute max session lifetime
+  #   max_sessions: 10  # max concurrent sessions
 
 # S3-compatible storage for output files
 storage:

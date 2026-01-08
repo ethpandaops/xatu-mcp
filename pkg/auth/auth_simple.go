@@ -465,49 +465,34 @@ func (s *simpleService) handleToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Copy values before releasing lock for validation.
-	// We validate BEFORE marking as used to prevent malformed requests from burning valid codes.
-	issuedClientID := issued.ClientID
-	issuedRedirectURI := issued.RedirectURI
-	issuedResource := issued.Resource
-	issuedCodeChallenge := issued.CodeChallenge
-	issuedGitHubLogin := issued.GitHubLogin
-	issuedGitHubID := issued.GitHubID
-	issuedOrgs := issued.Orgs
+	// Mark as used only after all checks pass.
+	issued.Used = true
 	s.codesMu.Unlock()
 
-	// Validate parameters BEFORE marking as used.
-	if issuedClientID != clientID || issuedRedirectURI != redirectURI || issuedResource != resource {
+	if issued.ClientID != clientID || issued.RedirectURI != redirectURI || issued.Resource != resource {
 		s.writeError(w, http.StatusBadRequest, "invalid_grant", "parameter mismatch")
 		return
 	}
 
-	// Verify PKCE BEFORE marking as used.
-	if !s.verifyPKCE(codeVerifier, issuedCodeChallenge) {
+	// Verify PKCE.
+	if !s.verifyPKCE(codeVerifier, issued.CodeChallenge) {
 		s.writeError(w, http.StatusBadRequest, "invalid_grant", "invalid code_verifier")
 		return
 	}
 
-	// All validation passed - now mark the code as used.
-	s.codesMu.Lock()
-	if issedCode, ok := s.codes[code]; ok {
-		issedCode.Used = true
-	}
-	s.codesMu.Unlock()
-
-	// Create JWT using the copied values.
+	// Create JWT.
 	now := time.Now()
 	claims := &tokenClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    s.baseURL,
-			Subject:   fmt.Sprintf("%d", issuedGitHubID),
-			Audience:  jwt.ClaimStrings{issuedResource},
+			Subject:   fmt.Sprintf("%d", issued.GitHubID),
+			Audience:  jwt.ClaimStrings{issued.Resource},
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(accessTokenTTL)),
 		},
-		GitHubLogin: issuedGitHubLogin,
-		GitHubID:    issuedGitHubID,
-		Orgs:        issuedOrgs,
+		GitHubLogin: issued.GitHubLogin,
+		GitHubID:    issued.GitHubID,
+		Orgs:        issued.Orgs,
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

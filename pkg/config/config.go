@@ -15,13 +15,30 @@ import (
 // Config is the main configuration structure.
 type Config struct {
 	Server        ServerConfig        `yaml:"server"`
-	ClickHouse    ClickHouseConfig    `yaml:"clickhouse"`
-	Prometheus    *PrometheusConfig   `yaml:"prometheus,omitempty"`
-	Loki          *LokiConfig         `yaml:"loki,omitempty"`
+	Grafana       GrafanaConfig       `yaml:"grafana"`
+	Auth          AuthConfig          `yaml:"auth"`
 	Sandbox       SandboxConfig       `yaml:"sandbox"`
 	Storage       *StorageConfig      `yaml:"storage,omitempty"`
-	Auth          AuthConfig          `yaml:"auth"`
 	Observability ObservabilityConfig `yaml:"observability"`
+}
+
+// AuthConfig holds authentication configuration.
+type AuthConfig struct {
+	Enabled     bool          `yaml:"enabled"`
+	GitHub      *GitHubConfig `yaml:"github,omitempty"`
+	AllowedOrgs []string      `yaml:"allowed_orgs,omitempty"`
+	Tokens      TokensConfig  `yaml:"tokens"`
+}
+
+// GitHubConfig holds GitHub OAuth configuration.
+type GitHubConfig struct {
+	ClientID     string `yaml:"client_id"`
+	ClientSecret string `yaml:"client_secret"`
+}
+
+// TokensConfig holds JWT token configuration.
+type TokensConfig struct {
+	SecretKey string `yaml:"secret_key"`
 }
 
 // ServerConfig holds server-specific configuration.
@@ -32,32 +49,20 @@ type ServerConfig struct {
 	Transport string `yaml:"transport"`
 }
 
-// ClickHouseConfig holds all ClickHouse cluster configurations.
-type ClickHouseConfig struct {
-	Xatu             *ClusterConfig `yaml:"xatu,omitempty"`
-	XatuExperimental *ClusterConfig `yaml:"xatu-experimental,omitempty"`
-	XatuCBT          *ClusterConfig `yaml:"xatu-cbt,omitempty"`
-}
-
-// ClusterConfig holds configuration for a single ClickHouse cluster.
-type ClusterConfig struct {
-	Host     string   `yaml:"host"`
-	Port     int      `yaml:"port"`
-	Protocol string   `yaml:"protocol"`
-	User     string   `yaml:"user"`
-	Password string   `yaml:"password"`
-	Database string   `yaml:"database"`
-	Networks []string `yaml:"networks,omitempty"`
-}
-
-// PrometheusConfig holds Prometheus configuration.
-type PrometheusConfig struct {
+// GrafanaConfig holds Grafana connection configuration.
+type GrafanaConfig struct {
+	// URL is the base URL of the Grafana instance.
 	URL string `yaml:"url"`
-}
 
-// LokiConfig holds Loki configuration.
-type LokiConfig struct {
-	URL string `yaml:"url"`
+	// ServiceToken is the Grafana service account token for authentication.
+	ServiceToken string `yaml:"service_token"`
+
+	// Timeout is the HTTP request timeout in seconds. Defaults to 120.
+	Timeout int `yaml:"timeout"`
+
+	// DatasourceUIDs optionally restricts which datasources are available.
+	// If empty, all discovered datasources of supported types are used.
+	DatasourceUIDs []string `yaml:"datasource_uids,omitempty"`
 }
 
 // SandboxConfig holds sandbox execution configuration.
@@ -103,25 +108,6 @@ type StorageConfig struct {
 	Region            string `yaml:"region"`
 	PublicURLPrefix   string `yaml:"public_url_prefix,omitempty"`
 	InternalURLPrefix string `yaml:"internal_url_prefix,omitempty"`
-}
-
-// AuthConfig holds authentication configuration.
-type AuthConfig struct {
-	Enabled     bool          `yaml:"enabled"`
-	GitHub      *GitHubConfig `yaml:"github,omitempty"`
-	AllowedOrgs []string      `yaml:"allowed_orgs,omitempty"`
-	Tokens      TokensConfig  `yaml:"tokens"`
-}
-
-// GitHubConfig holds GitHub OAuth configuration.
-type GitHubConfig struct {
-	ClientID     string `yaml:"client_id"`
-	ClientSecret string `yaml:"client_secret"`
-}
-
-// TokensConfig holds JWT token configuration.
-type TokensConfig struct {
-	SecretKey string `yaml:"secret_key"`
 }
 
 // ObservabilityConfig holds observability configuration.
@@ -214,6 +200,11 @@ func applyDefaults(cfg *Config) {
 		cfg.Server.Transport = "stdio"
 	}
 
+	// Grafana defaults.
+	if cfg.Grafana.Timeout == 0 {
+		cfg.Grafana.Timeout = 120
+	}
+
 	if cfg.Sandbox.Backend == "" {
 		cfg.Sandbox.Backend = "docker"
 	}
@@ -250,6 +241,14 @@ const MaxSandboxTimeout = 300
 
 // Validate validates the configuration.
 func (c *Config) Validate() error {
+	if c.Grafana.URL == "" {
+		return errors.New("grafana.url is required")
+	}
+
+	if c.Grafana.ServiceToken == "" {
+		return errors.New("grafana.service_token is required")
+	}
+
 	if c.Sandbox.Image == "" {
 		return errors.New("sandbox.image is required")
 	}
@@ -259,35 +258,5 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("sandbox.timeout cannot exceed %d seconds", MaxSandboxTimeout)
 	}
 
-	if c.Auth.Enabled {
-		if c.Auth.GitHub == nil {
-			return errors.New("github configuration is required when auth is enabled")
-		}
-		if c.Auth.GitHub.ClientID == "" {
-			return errors.New("github.client_id is required when auth is enabled")
-		}
-		if c.Auth.GitHub.ClientSecret == "" {
-			return errors.New("github.client_secret is required when auth is enabled")
-		}
-		if c.Auth.Tokens.SecretKey == "" {
-			return errors.New("tokens.secret_key is required when auth is enabled")
-		}
-	}
-
 	return nil
-}
-
-// ToClusters converts ClickHouseConfig to a map of cluster names to configs.
-func (c *ClickHouseConfig) ToClusters() map[string]*ClusterConfig {
-	clusters := make(map[string]*ClusterConfig, 3)
-	if c.Xatu != nil {
-		clusters["xatu"] = c.Xatu
-	}
-	if c.XatuExperimental != nil {
-		clusters["xatu-experimental"] = c.XatuExperimental
-	}
-	if c.XatuCBT != nil {
-		clusters["xatu-cbt"] = c.XatuCBT
-	}
-	return clusters
 }

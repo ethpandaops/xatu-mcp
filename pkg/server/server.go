@@ -16,8 +16,8 @@ import (
 
 	"github.com/ethpandaops/xatu-mcp/internal/version"
 	"github.com/ethpandaops/xatu-mcp/pkg/auth"
-	"github.com/ethpandaops/xatu-mcp/pkg/clickhouse"
 	"github.com/ethpandaops/xatu-mcp/pkg/config"
+	"github.com/ethpandaops/xatu-mcp/pkg/grafana"
 	"github.com/ethpandaops/xatu-mcp/pkg/observability"
 	"github.com/ethpandaops/xatu-mcp/pkg/resource"
 	"github.com/ethpandaops/xatu-mcp/pkg/sandbox"
@@ -47,7 +47,7 @@ type service struct {
 	toolRegistry     tool.Registry
 	resourceRegistry resource.Registry
 	sandbox          sandbox.Service
-	clickhouse       clickhouse.Client
+	grafana          grafana.Client
 	auth             auth.SimpleService
 	mcpServer        *mcpserver.MCPServer
 	sseServer        *mcpserver.SSEServer
@@ -65,7 +65,7 @@ func NewService(
 	toolRegistry tool.Registry,
 	resourceRegistry resource.Registry,
 	sandboxSvc sandbox.Service,
-	clickhouseClient clickhouse.Client,
+	grafanaClient grafana.Client,
 	authSvc auth.SimpleService,
 ) Service {
 	return &service{
@@ -75,7 +75,7 @@ func NewService(
 		toolRegistry:     toolRegistry,
 		resourceRegistry: resourceRegistry,
 		sandbox:          sandboxSvc,
-		clickhouse:       clickhouseClient,
+		grafana:          grafanaClient,
 		auth:             authSvc,
 		done:             make(chan struct{}),
 	}
@@ -92,15 +92,9 @@ func (s *service) Start(ctx context.Context) error {
 	s.mu.Unlock()
 
 	s.log.WithFields(logrus.Fields{
-		"transport":    s.cfg.Transport,
-		"version":      version.Version,
-		"auth_enabled": s.auth.Enabled(),
+		"transport": s.cfg.Transport,
+		"version":   version.Version,
 	}).Info("Starting MCP server")
-
-	// Start auth service if enabled.
-	if err := s.auth.Start(ctx); err != nil {
-		return fmt.Errorf("starting auth service: %w", err)
-	}
 
 	// Mark as running only after successful initialization.
 	s.mu.Lock()
@@ -149,7 +143,7 @@ func (s *service) Stop() error {
 	close(s.done)
 	s.running = false
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*1e9)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if s.httpServer != nil {
@@ -164,15 +158,17 @@ func (s *service) Stop() error {
 		}
 	}
 
-	// Stop auth service.
-	if err := s.auth.Stop(); err != nil {
-		s.log.WithError(err).Error("Failed to stop auth service")
+	// Stop the auth service.
+	if s.auth != nil {
+		if err := s.auth.Stop(); err != nil {
+			s.log.WithError(err).Error("Failed to stop auth service")
+		}
 	}
 
-	// Stop the ClickHouse client.
-	if s.clickhouse != nil {
-		if err := s.clickhouse.Stop(); err != nil {
-			s.log.WithError(err).Error("Failed to stop ClickHouse client")
+	// Stop the Grafana client.
+	if s.grafana != nil {
+		if err := s.grafana.Stop(); err != nil {
+			s.log.WithError(err).Error("Failed to stop Grafana client")
 		}
 	}
 
@@ -306,10 +302,7 @@ func (s *service) runStdio(ctx context.Context) error {
 func (s *service) runSSE(ctx context.Context) error {
 	addr := fmt.Sprintf("%s:%d", s.cfg.Host, s.cfg.Port)
 
-	s.log.WithFields(logrus.Fields{
-		"address":      addr,
-		"auth_enabled": s.auth.Enabled(),
-	}).Info("Running MCP server with SSE transport")
+	s.log.WithField("address", addr).Info("Running MCP server with SSE transport")
 
 	opts := []mcpserver.SSEOption{
 		mcpserver.WithKeepAlive(true),
@@ -358,10 +351,7 @@ func (s *service) runSSE(ctx context.Context) error {
 func (s *service) runStreamableHTTP(ctx context.Context) error {
 	addr := fmt.Sprintf("%s:%d", s.cfg.Host, s.cfg.Port)
 
-	s.log.WithFields(logrus.Fields{
-		"address":      addr,
-		"auth_enabled": s.auth.Enabled(),
-	}).Info("Running MCP server with streamable-http transport")
+	s.log.WithField("address", addr).Info("Running MCP server with streamable-http transport")
 
 	// StreamableHTTP uses the same SSE server infrastructure with different settings.
 	opts := []mcpserver.SSEOption{
@@ -407,11 +397,21 @@ func (s *service) runStreamableHTTP(ctx context.Context) error {
 	}
 }
 
-// buildHTTPHandler creates an HTTP handler with auth routes and middleware.
+// buildHTTPHandler creates an HTTP handler with routes.
 func (s *service) buildHTTPHandler(mcpHandler http.Handler) http.Handler {
 	r := chi.NewRouter()
 
-	// Health endpoints (always public).
+	// Apply auth middleware if enabled.
+	if s.auth != nil && s.auth.Enabled() {
+		r.Use(s.auth.Middleware())
+	}
+
+	// Mount auth routes (discovery endpoints, OAuth flow).
+	if s.auth != nil {
+		s.auth.MountRoutes(r)
+	}
+
+	// Health endpoints.
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -421,18 +421,11 @@ func (s *service) buildHTTPHandler(mcpHandler http.Handler) http.Handler {
 		_, _ = w.Write([]byte("ready"))
 	})
 
-	// Mount auth routes (discovery endpoints, OAuth flow).
-	s.auth.MountRoutes(r)
-
-	// Apply auth middleware and mount MCP handler.
-	// Auth middleware handles public vs protected paths.
-	r.Group(func(r chi.Router) {
-		r.Use(s.auth.Middleware())
-		r.Handle("/sse", mcpHandler)
-		r.Handle("/sse/*", mcpHandler)
-		r.Handle("/message", mcpHandler)
-		r.Handle("/message/*", mcpHandler)
-	})
+	// Mount MCP handler.
+	r.Handle("/sse", mcpHandler)
+	r.Handle("/sse/*", mcpHandler)
+	r.Handle("/message", mcpHandler)
+	r.Handle("/message/*", mcpHandler)
 
 	return r
 }

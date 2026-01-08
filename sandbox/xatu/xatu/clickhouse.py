@@ -1,235 +1,257 @@
-"""ClickHouse data access for Ethereum blockchain data.
+"""ClickHouse data access via Grafana proxy.
 
-This module provides functions to query ClickHouse clusters containing
-Ethereum network data from the Xatu project.
-
-Available clusters:
-- xatu: Production raw data (mainnet, sepolia, holesky, hoodi)
-- xatu-experimental: Devnet raw data
-- xatu-cbt: Aggregated/CBT tables
+This module provides functions to query ClickHouse datasources
+through Grafana's unified query API.
 
 Example:
     from xatu import clickhouse
 
-    # Query production data (cluster must be explicitly specified)
-    df = clickhouse.query("mainnet", "SELECT * FROM beacon_api_eth_v1_events_block LIMIT 10", cluster="xatu")
+    # List available ClickHouse datasources
+    datasources = clickhouse.list_datasources()
 
-    # Query CBT tables
-    df = clickhouse.query("mainnet", "SELECT * FROM cbt_slots", cluster="xatu-cbt")
-
-    # List available tables
-    tables = clickhouse.list_tables(cluster="xatu")
-
-    # Get table schema
-    schema = clickhouse.describe_table("beacon_api_eth_v1_events_block", cluster="xatu")
+    # Query using datasource UID
+    df = clickhouse.query("datasource-uid", "SELECT * FROM beacon_api_eth_v1_events_block LIMIT 10")
 """
 
 import os
 from typing import Any
 
-import clickhouse_connect
+import httpx
 import pandas as pd
 
-# Cluster configuration from environment variables
-_CLUSTERS = {
-    "xatu": {
-        "host": os.environ.get("XATU_CLICKHOUSE_HOST", ""),
-        "port": int(os.environ.get("XATU_CLICKHOUSE_PORT", "443")),
-        "protocol": os.environ.get("XATU_CLICKHOUSE_PROTOCOL", "https"),
-        "user": os.environ.get("XATU_CLICKHOUSE_USER", ""),
-        "password": os.environ.get("XATU_CLICKHOUSE_PASSWORD", ""),
-        "database": os.environ.get("XATU_CLICKHOUSE_DATABASE", "default"),
-        "networks": ["mainnet", "sepolia", "holesky", "hoodi"],
-    },
-    "xatu-experimental": {
-        "host": os.environ.get("XATU_EXPERIMENTAL_CLICKHOUSE_HOST", ""),
-        "port": int(os.environ.get("XATU_EXPERIMENTAL_CLICKHOUSE_PORT", "443")),
-        "protocol": os.environ.get("XATU_EXPERIMENTAL_CLICKHOUSE_PROTOCOL", "https"),
-        "user": os.environ.get("XATU_EXPERIMENTAL_CLICKHOUSE_USER", ""),
-        "password": os.environ.get("XATU_EXPERIMENTAL_CLICKHOUSE_PASSWORD", ""),
-        "database": os.environ.get("XATU_EXPERIMENTAL_CLICKHOUSE_DATABASE", "default"),
-        "networks": [],  # Dynamic devnets
-    },
-    "xatu-cbt": {
-        "host": os.environ.get("XATU_CBT_CLICKHOUSE_HOST", ""),
-        "port": int(os.environ.get("XATU_CBT_CLICKHOUSE_PORT", "443")),
-        "protocol": os.environ.get("XATU_CBT_CLICKHOUSE_PROTOCOL", "https"),
-        "user": os.environ.get("XATU_CBT_CLICKHOUSE_USER", ""),
-        "password": os.environ.get("XATU_CBT_CLICKHOUSE_PASSWORD", ""),
-        "database": os.environ.get("XATU_CBT_CLICKHOUSE_DATABASE", "default"),
-        "networks": ["mainnet", "sepolia", "holesky", "hoodi"],
-    },
-}
+# Grafana configuration from environment variables
+_GRAFANA_URL = os.environ.get("XATU_GRAFANA_URL", "")
+_GRAFANA_TOKEN = os.environ.get("XATU_GRAFANA_TOKEN", "")
+_HTTP_TIMEOUT = int(os.environ.get("XATU_HTTP_TIMEOUT", "120"))
 
-# Cache for clients
-_clients: dict[str, clickhouse_connect.driver.Client] = {}
+# Cache for datasources
+_DATASOURCES: dict[str, dict] | None = None
 
 
-def _get_env_var_name(cluster: str, suffix: str) -> str:
-    """Get the environment variable name for a cluster config.
-
-    Args:
-        cluster: Cluster name (e.g., "xatu", "xatu-experimental").
-        suffix: Config suffix (e.g., "HOST", "PORT").
+def _get_client() -> httpx.Client:
+    """Create an HTTP client for Grafana API calls.
 
     Returns:
-        Environment variable name.
-    """
-    if cluster == "xatu":
-        return f"XATU_CLICKHOUSE_{suffix}"
-    else:
-        cluster_part = cluster.upper().replace("-", "_").replace("XATU_", "")
-        return f"XATU_{cluster_part}_CLICKHOUSE_{suffix}"
-
-
-def _get_client(cluster: str) -> clickhouse_connect.driver.Client:
-    """Get or create a ClickHouse client for a cluster.
-
-    Args:
-        cluster: Cluster name.
-
-    Returns:
-        ClickHouse client.
+        Configured httpx client.
 
     Raises:
-        ValueError: If cluster is unknown or not configured.
+        ValueError: If Grafana is not configured.
     """
-    if cluster in _clients:
-        return _clients[cluster]
-
-    if cluster not in _CLUSTERS:
-        raise ValueError(f"Unknown cluster: '{cluster}'. Available: {list(_CLUSTERS.keys())}")
-
-    config = _CLUSTERS[cluster]
-
-    if not config["host"]:
+    if not _GRAFANA_URL or not _GRAFANA_TOKEN:
         raise ValueError(
-            f"Cluster '{cluster}' not configured. "
-            f"Set {_get_env_var_name(cluster, 'HOST')} environment variable."
+            "Grafana not configured. "
+            "Set XATU_GRAFANA_URL and XATU_GRAFANA_TOKEN environment variables."
         )
 
-    secure = config["protocol"] == "https"
-
-    client = clickhouse_connect.get_client(
-        host=config["host"],
-        port=config["port"],
-        username=config["user"],
-        password=config["password"],
-        database=config["database"],
-        secure=secure,
+    return httpx.Client(
+        base_url=_GRAFANA_URL,
+        headers={
+            "Authorization": f"Bearer {_GRAFANA_TOKEN}",
+            "Content-Type": "application/json",
+        },
+        timeout=_HTTP_TIMEOUT,
     )
 
-    _clients[cluster] = client
-    return client
+
+def list_datasources() -> list[dict]:
+    """List available ClickHouse datasources from Grafana.
+
+    Returns:
+        List of datasource info dictionaries with uid, name, and type.
+
+    Example:
+        >>> datasources = list_datasources()
+        >>> for ds in datasources:
+        ...     print(f"{ds['name']}: {ds['uid']}")
+    """
+    global _DATASOURCES
+
+    with _get_client() as client:
+        resp = client.get("/api/datasources")
+        resp.raise_for_status()
+
+        datasources = []
+        _DATASOURCES = {}
+
+        for ds in resp.json():
+            ds_type = ds.get("type", "").lower()
+            if "clickhouse" in ds_type:
+                info = {
+                    "uid": ds["uid"],
+                    "name": ds["name"],
+                    "type": ds["type"],
+                }
+                datasources.append(info)
+                _DATASOURCES[ds["uid"]] = info
+
+        return datasources
+
+
+def _get_datasource(datasource_uid: str) -> dict:
+    """Get datasource info, discovering if necessary.
+
+    Args:
+        datasource_uid: The Grafana datasource UID.
+
+    Returns:
+        Datasource info dictionary.
+
+    Raises:
+        ValueError: If datasource is not found.
+    """
+    global _DATASOURCES
+
+    if _DATASOURCES is None:
+        list_datasources()
+
+    if _DATASOURCES and datasource_uid in _DATASOURCES:
+        return _DATASOURCES[datasource_uid]
+
+    # Datasource not found, try to fetch it directly
+    with _get_client() as client:
+        resp = client.get(f"/api/datasources/uid/{datasource_uid}")
+        if resp.status_code == 404:
+            available = list(_DATASOURCES.keys()) if _DATASOURCES else []
+            raise ValueError(
+                f"Datasource '{datasource_uid}' not found. "
+                f"Available ClickHouse datasources: {available}"
+            )
+        resp.raise_for_status()
+
+        ds = resp.json()
+        info = {
+            "uid": ds["uid"],
+            "name": ds["name"],
+            "type": ds["type"],
+        }
+
+        if _DATASOURCES is not None:
+            _DATASOURCES[ds["uid"]] = info
+
+        return info
 
 
 def query(
-    network: str,
+    datasource_uid: str,
     sql: str,
-    cluster: str,
     parameters: dict[str, Any] | None = None,
 ) -> pd.DataFrame:
-    """Execute a SQL query and return results as a DataFrame.
+    """Execute a SQL query via Grafana and return results as a DataFrame.
 
     Args:
-        network: Network name (e.g., "mainnet", "holesky").
+        datasource_uid: The Grafana datasource UID for the ClickHouse instance.
         sql: SQL query to execute.
-        cluster: Which cluster to query. Must be explicitly specified.
-            - "xatu": Raw production data
-            - "xatu-experimental": Raw devnet data
-            - "xatu-cbt": Aggregated/CBT tables
-        parameters: Query parameters for parameterized queries.
+        parameters: Optional query parameters (currently not supported via Grafana).
 
     Returns:
         DataFrame with query results.
 
     Raises:
-        ValueError: If cluster is not specified or is invalid.
+        ValueError: If datasource is not found or query fails.
 
     Example:
-        >>> df = query("mainnet", "SELECT * FROM blocks LIMIT 10", cluster="xatu")
-        >>> df = query("mainnet", "SELECT * FROM cbt_slots", cluster="xatu-cbt")
+        >>> df = query("my-clickhouse-uid", "SELECT * FROM blocks LIMIT 10")
     """
-    if not cluster:
-        raise ValueError(
-            f"cluster parameter is required. Available clusters: {list(_CLUSTERS.keys())}"
+    if parameters:
+        raise NotImplementedError(
+            "Parameterized queries are not yet supported via Grafana proxy. "
+            "Please inline your parameters in the SQL query."
         )
 
-    client = _get_client(cluster)
+    ds = _get_datasource(datasource_uid)
 
-    return client.query_df(sql, parameters=parameters)
+    # Build Grafana unified query request
+    import time
+
+    now_ms = int(time.time() * 1000)
+    from_ms = now_ms - (60 * 60 * 1000)  # 1 hour ago
+
+    body = {
+        "from": str(from_ms),
+        "to": str(now_ms),
+        "queries": [
+            {
+                "refId": "A",
+                "datasource": {"uid": datasource_uid, "type": ds["type"]},
+                "queryType": "sql",
+                "editorType": "sql",
+                "format": 1,  # Table format
+                "intervalMs": 1000,
+                "maxDataPoints": 10000,
+                "rawSql": sql,
+            },
+        ],
+    }
+
+    with _get_client() as client:
+        resp = client.post("/api/ds/query", json=body)
+        resp.raise_for_status()
+
+        return _parse_grafana_response(resp.json())
+
+
+def _parse_grafana_response(data: dict) -> pd.DataFrame:
+    """Parse a Grafana unified query response into a DataFrame.
+
+    Args:
+        data: Grafana API response.
+
+    Returns:
+        DataFrame with query results.
+
+    Raises:
+        ValueError: If the response contains an error.
+    """
+    results = data.get("results", {})
+
+    for ref_id, result in results.items():
+        # Check for errors
+        if error := result.get("error"):
+            raise ValueError(f"Query failed: {error}")
+
+        frames = result.get("frames", [])
+        if not frames:
+            return pd.DataFrame()
+
+        # Parse the first frame
+        frame = frames[0]
+        schema = frame.get("schema", {})
+        fields = schema.get("fields", [])
+        values = frame.get("data", {}).get("values", [])
+
+        if not fields or not values:
+            return pd.DataFrame()
+
+        # Build DataFrame
+        columns = [f["name"] for f in fields]
+        data_dict = dict(zip(columns, values))
+
+        return pd.DataFrame(data_dict)
+
+    return pd.DataFrame()
 
 
 def query_raw(
-    network: str,
+    datasource_uid: str,
     sql: str,
-    cluster: str,
     parameters: dict[str, Any] | None = None,
 ) -> tuple[list[tuple], list[str]]:
     """Execute a SQL query and return raw results.
 
     Args:
-        network: Network name.
+        datasource_uid: The Grafana datasource UID.
         sql: SQL query to execute.
-        cluster: Which cluster to query. Must be explicitly specified.
-            - "xatu": Raw production data
-            - "xatu-experimental": Raw devnet data
-            - "xatu-cbt": Aggregated/CBT tables
-        parameters: Query parameters.
+        parameters: Optional query parameters (currently not supported).
 
     Returns:
         Tuple of (rows, column_names).
-
-    Raises:
-        ValueError: If cluster is not specified or is invalid.
     """
-    if not cluster:
-        raise ValueError(
-            f"cluster parameter is required. Available clusters: {list(_CLUSTERS.keys())}"
-        )
+    df = query(datasource_uid, sql, parameters)
 
-    client = _get_client(cluster)
+    if df.empty:
+        return [], []
 
-    result = client.query(sql, parameters=parameters)
+    rows = [tuple(row) for row in df.values]
+    columns = list(df.columns)
 
-    return result.result_rows, result.column_names
-
-
-def list_tables(cluster: str = "xatu") -> list[str]:
-    """List all tables in a cluster.
-
-    Args:
-        cluster: Cluster to query.
-
-    Returns:
-        List of table names.
-    """
-    client = _get_client(cluster)
-
-    result = client.query("SHOW TABLES")
-
-    return [row[0] for row in result.result_rows]
-
-
-def describe_table(table: str, cluster: str = "xatu") -> pd.DataFrame:
-    """Get the schema of a table.
-
-    Args:
-        table: Table name.
-        cluster: Cluster where the table exists.
-
-    Returns:
-        DataFrame with column information.
-    """
-    client = _get_client(cluster)
-
-    return client.query_df(f"DESCRIBE TABLE {table}")
-
-
-def get_available_networks() -> dict[str, list[str]]:
-    """Get available networks for each cluster.
-
-    Returns:
-        Dictionary mapping cluster names to lists of network names.
-    """
-    return {name: config["networks"] for name, config in _CLUSTERS.items()}
+    return rows, columns

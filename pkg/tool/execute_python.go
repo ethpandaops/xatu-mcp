@@ -3,6 +3,7 @@ package tool
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,16 +28,22 @@ const (
 // executePythonDescription is the detailed description of the execute_python tool.
 const executePythonDescription = `Execute Python code in a sandboxed environment.
 
-The xatu library is pre-installed for querying Ethereum network data:
+The xatu library is pre-installed for querying Ethereum network data via Grafana:
 
 ` + "```python" + `
 from xatu import clickhouse, prometheus, loki, storage
 
-# Query ClickHouse for blockchain data (network, sql, cluster)
-df = clickhouse.query("mainnet", "SELECT * FROM beacon_api_eth_v1_events_block LIMIT 10", cluster="xatu")
+# First, list available datasources
+datasources = clickhouse.list_datasources()  # Returns available ClickHouse datasources
 
-# Query Prometheus metrics
-result = prometheus.query("up")
+# Query ClickHouse via Grafana proxy (datasource_uid, sql)
+df = clickhouse.query("datasource-uid", "SELECT * FROM beacon_api_eth_v1_events_block LIMIT 10")
+
+# Query Prometheus via Grafana proxy
+result = prometheus.query("datasource-uid", "up")
+
+# Query Loki via Grafana proxy
+logs = loki.query("datasource-uid", '{app="beacon-node"}', limit=100)
 
 # Generate and save charts
 import matplotlib.pyplot as plt
@@ -49,10 +56,7 @@ url = storage.upload('/output/chart.png')
 print(f"Chart: {url}")
 ` + "```" + `
 
-Available ClickHouse clusters:
-- "xatu": Production raw data (mainnet, sepolia, holesky, hoodi)
-- "xatu-experimental": Devnet raw data
-- "xatu-cbt": Aggregated/CBT tables
+Use the datasources://list resource to discover available datasources and their UIDs.
 
 ## Sessions (Persistent Workspaces)
 
@@ -68,7 +72,7 @@ Example workflow:
 
 ` + "```python" + `
 # In first execution - save data to workspace
-df = clickhouse.query("mainnet", "SELECT * FROM ... LIMIT 1000", cluster="xatu")
+df = clickhouse.query("datasource-uid", "SELECT * FROM ... LIMIT 1000")
 df.to_parquet('/workspace/data.parquet')
 print("Data saved!")
 
@@ -148,11 +152,10 @@ func newExecutePythonHandler(
 		// Extract optional session_id.
 		sessionID := request.GetString("session_id", "")
 
-		// Extract owner ID from authenticated user context.
-		// This is used to bind sessions to specific users.
-		ownerID := ""
-		if authUser := auth.GetAuthUser(ctx); authUser != nil {
-			ownerID = fmt.Sprintf("%d", authUser.GitHubID)
+		// Extract owner ID from auth context for session binding.
+		var ownerID string
+		if user := auth.GetAuthUser(ctx); user != nil {
+			ownerID = fmt.Sprintf("%d", user.GitHubID)
 		}
 
 		handlerLog.WithFields(logrus.Fields{
@@ -264,45 +267,12 @@ func formatSize(bytes int64) string {
 
 // buildSandboxEnv creates the environment variables map for the sandbox.
 func buildSandboxEnv(cfg *config.Config) map[string]string {
-	env := make(map[string]string, 32)
+	env := make(map[string]string, 8)
 
-	// ClickHouse clusters.
-	if cfg.ClickHouse.Xatu != nil {
-		env["XATU_CLICKHOUSE_HOST"] = cfg.ClickHouse.Xatu.Host
-		env["XATU_CLICKHOUSE_PORT"] = fmt.Sprintf("%d", cfg.ClickHouse.Xatu.Port)
-		env["XATU_CLICKHOUSE_PROTOCOL"] = cfg.ClickHouse.Xatu.Protocol
-		env["XATU_CLICKHOUSE_USER"] = cfg.ClickHouse.Xatu.User
-		env["XATU_CLICKHOUSE_PASSWORD"] = cfg.ClickHouse.Xatu.Password
-		env["XATU_CLICKHOUSE_DATABASE"] = cfg.ClickHouse.Xatu.Database
-	}
-
-	if cfg.ClickHouse.XatuExperimental != nil {
-		env["XATU_EXPERIMENTAL_CLICKHOUSE_HOST"] = cfg.ClickHouse.XatuExperimental.Host
-		env["XATU_EXPERIMENTAL_CLICKHOUSE_PORT"] = fmt.Sprintf("%d", cfg.ClickHouse.XatuExperimental.Port)
-		env["XATU_EXPERIMENTAL_CLICKHOUSE_PROTOCOL"] = cfg.ClickHouse.XatuExperimental.Protocol
-		env["XATU_EXPERIMENTAL_CLICKHOUSE_USER"] = cfg.ClickHouse.XatuExperimental.User
-		env["XATU_EXPERIMENTAL_CLICKHOUSE_PASSWORD"] = cfg.ClickHouse.XatuExperimental.Password
-		env["XATU_EXPERIMENTAL_CLICKHOUSE_DATABASE"] = cfg.ClickHouse.XatuExperimental.Database
-	}
-
-	if cfg.ClickHouse.XatuCBT != nil {
-		env["XATU_CBT_CLICKHOUSE_HOST"] = cfg.ClickHouse.XatuCBT.Host
-		env["XATU_CBT_CLICKHOUSE_PORT"] = fmt.Sprintf("%d", cfg.ClickHouse.XatuCBT.Port)
-		env["XATU_CBT_CLICKHOUSE_PROTOCOL"] = cfg.ClickHouse.XatuCBT.Protocol
-		env["XATU_CBT_CLICKHOUSE_USER"] = cfg.ClickHouse.XatuCBT.User
-		env["XATU_CBT_CLICKHOUSE_PASSWORD"] = cfg.ClickHouse.XatuCBT.Password
-		env["XATU_CBT_CLICKHOUSE_DATABASE"] = cfg.ClickHouse.XatuCBT.Database
-	}
-
-	// Prometheus.
-	if cfg.Prometheus != nil {
-		env["XATU_PROMETHEUS_URL"] = cfg.Prometheus.URL
-	}
-
-	// Loki.
-	if cfg.Loki != nil {
-		env["XATU_LOKI_URL"] = cfg.Loki.URL
-	}
+	// Grafana configuration - all datasource queries route through Grafana.
+	env["XATU_GRAFANA_URL"] = cfg.Grafana.URL
+	env["XATU_GRAFANA_TOKEN"] = cfg.Grafana.ServiceToken
+	env["XATU_HTTP_TIMEOUT"] = strconv.Itoa(cfg.Grafana.Timeout)
 
 	// S3 Storage.
 	if cfg.Storage != nil {

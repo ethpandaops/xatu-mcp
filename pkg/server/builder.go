@@ -7,8 +7,8 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/ethpandaops/xatu-mcp/pkg/auth"
-	"github.com/ethpandaops/xatu-mcp/pkg/clickhouse"
 	"github.com/ethpandaops/xatu-mcp/pkg/config"
+	"github.com/ethpandaops/xatu-mcp/pkg/grafana"
 	"github.com/ethpandaops/xatu-mcp/pkg/resource"
 	"github.com/ethpandaops/xatu-mcp/pkg/sandbox"
 	"github.com/ethpandaops/xatu-mcp/pkg/tool"
@@ -21,7 +21,8 @@ type Dependencies struct {
 	ToolRegistry     tool.Registry
 	ResourceRegistry resource.Registry
 	Sandbox          sandbox.Service
-	ClickHouse       clickhouse.Client
+	Grafana          grafana.Client
+	Auth             auth.SimpleService
 }
 
 // Builder constructs and wires all dependencies for the MCP server.
@@ -55,41 +56,49 @@ func (b *Builder) Build(ctx context.Context) (Service, error) {
 
 	b.log.WithField("backend", sandboxSvc.Name()).Info("Sandbox service started")
 
-	// Create ClickHouse client
-	chClient, err := b.buildClickHouse()
+	// Create Grafana client
+	grafanaClient := b.buildGrafana()
+
+	// Start the Grafana client to initialize and discover datasources
+	if err := grafanaClient.Start(ctx); err != nil {
+		// Clean up sandbox on failure
+		_ = sandboxSvc.Stop(ctx)
+
+		return nil, fmt.Errorf("starting grafana client: %w", err)
+	}
+
+	b.log.Info("Grafana client started")
+
+	// Create auth service
+	authSvc, err := b.buildAuth()
 	if err != nil {
-		// Clean up sandbox on failure
+		// Clean up on failure
 		_ = sandboxSvc.Stop(ctx)
+		_ = grafanaClient.Stop()
 
-		return nil, fmt.Errorf("building clickhouse client: %w", err)
+		return nil, fmt.Errorf("building auth: %w", err)
 	}
 
-	// Start the ClickHouse client to initialize the HTTP client
-	if err := chClient.Start(ctx); err != nil {
-		// Clean up sandbox on failure
+	// Start the auth service
+	if err := authSvc.Start(ctx); err != nil {
+		// Clean up on failure
 		_ = sandboxSvc.Stop(ctx)
+		_ = grafanaClient.Stop()
 
-		return nil, fmt.Errorf("starting clickhouse client: %w", err)
+		return nil, fmt.Errorf("starting auth: %w", err)
 	}
 
-	b.log.Info("ClickHouse client started")
+	if authSvc.Enabled() {
+		b.log.Info("Auth service started")
+	}
 
 	// Create tool registry and register tools
 	toolReg := b.buildToolRegistry(sandboxSvc, b.cfg.Storage)
 
 	// Create resource registry and register resources
-	resourceReg := b.buildResourceRegistry(chClient)
+	resourceReg := b.buildResourceRegistry(grafanaClient)
 
-	// Create auth service
-	authSvc, err := b.buildAuth()
-	if err != nil {
-		_ = chClient.Stop()
-		_ = sandboxSvc.Stop(ctx)
-
-		return nil, fmt.Errorf("building auth service: %w", err)
-	}
-
-	// Create and return the server service (sandbox and clickhouse are passed for lifecycle management)
+	// Create and return the server service
 	return NewService(
 		b.log,
 		b.cfg.Server,
@@ -97,7 +106,7 @@ func (b *Builder) Build(ctx context.Context) (Service, error) {
 		toolReg,
 		resourceReg,
 		sandboxSvc,
-		chClient,
+		grafanaClient,
 		authSvc,
 	), nil
 }
@@ -107,22 +116,19 @@ func (b *Builder) buildSandbox() (sandbox.Service, error) {
 	return sandbox.New(b.cfg.Sandbox, b.log)
 }
 
-// buildAuth creates the auth service.
-func (b *Builder) buildAuth() (auth.SimpleService, error) {
-	// Build the base URL for auth.
-	baseURL := b.cfg.Server.BaseURL
-	if baseURL == "" {
-		baseURL = fmt.Sprintf("http://%s:%d", b.cfg.Server.Host, b.cfg.Server.Port)
-	}
-
-	return auth.NewSimpleService(b.log, b.cfg.Auth, baseURL)
+// buildGrafana creates the Grafana client.
+func (b *Builder) buildGrafana() grafana.Client {
+	return grafana.NewClient(b.log, &grafana.Config{
+		URL:            b.cfg.Grafana.URL,
+		ServiceToken:   b.cfg.Grafana.ServiceToken,
+		Timeout:        b.cfg.Grafana.Timeout,
+		DatasourceUIDs: b.cfg.Grafana.DatasourceUIDs,
+	})
 }
 
-// buildClickHouse creates the ClickHouse client.
-func (b *Builder) buildClickHouse() (clickhouse.Client, error) {
-	clusters := b.cfg.ClickHouse.ToClusters()
-
-	return clickhouse.NewClient(b.log, clusters), nil
+// buildAuth creates the auth service.
+func (b *Builder) buildAuth() (auth.SimpleService, error) {
+	return auth.NewSimpleService(b.log, b.cfg.Auth, b.cfg.Server.BaseURL)
 }
 
 // buildToolRegistry creates and populates the tool registry.
@@ -158,19 +164,11 @@ func (b *Builder) buildToolRegistry(
 }
 
 // buildResourceRegistry creates and populates the resource registry.
-func (b *Builder) buildResourceRegistry(chClient clickhouse.Client) resource.Registry {
+func (b *Builder) buildResourceRegistry(grafanaClient grafana.Client) resource.Registry {
 	reg := resource.NewRegistry(b.log)
 
-	// Create cluster provider adapter
-	provider := newClusterProviderAdapter(chClient)
-
-	// Create schema client factory
-	clientFactory := func(clusterName string) (resource.SchemaClient, error) {
-		return newSchemaClientAdapter(chClient, clusterName), nil
-	}
-
-	// Register schema resources
-	resource.RegisterSchemaResources(b.log, reg, provider, clientFactory)
+	// Register datasources resources
+	resource.RegisterDatasourcesResources(b.log, reg, grafanaClient)
 
 	// Register examples resources
 	resource.RegisterExamplesResources(b.log, reg)
@@ -189,53 +187,4 @@ func (b *Builder) buildResourceRegistry(chClient clickhouse.Client) resource.Reg
 	}).Info("Resource registry built")
 
 	return reg
-}
-
-// clusterProviderAdapter adapts clickhouse.Client to resource.ClusterProvider.
-type clusterProviderAdapter struct {
-	client clickhouse.Client
-}
-
-func newClusterProviderAdapter(client clickhouse.Client) resource.ClusterProvider {
-	return &clusterProviderAdapter{client: client}
-}
-
-func (a *clusterProviderAdapter) GetCluster(name string) (*clickhouse.ClusterInfo, bool) {
-	return a.client.GetCluster(name)
-}
-
-func (a *clusterProviderAdapter) ListClusters() []*clickhouse.ClusterInfo {
-	infos := a.client.ListClusters()
-	result := make([]*clickhouse.ClusterInfo, len(infos))
-
-	for i := range infos {
-		result[i] = &infos[i]
-	}
-
-	return result
-}
-
-// schemaClientAdapter adapts clickhouse.Client to resource.SchemaClient.
-type schemaClientAdapter struct {
-	client      clickhouse.Client
-	clusterName string
-}
-
-func newSchemaClientAdapter(client clickhouse.Client, clusterName string) resource.SchemaClient {
-	return &schemaClientAdapter{
-		client:      client,
-		clusterName: clusterName,
-	}
-}
-
-func (a *schemaClientAdapter) ListTables(ctx context.Context) ([]clickhouse.TableInfo, error) {
-	return a.client.ListTables(ctx, a.clusterName)
-}
-
-func (a *schemaClientAdapter) GetTableInfo(ctx context.Context, tableName string) (*clickhouse.TableInfo, error) {
-	return a.client.GetTableInfo(ctx, a.clusterName, tableName)
-}
-
-func (a *schemaClientAdapter) GetTableSchema(ctx context.Context, tableName string) ([]clickhouse.ColumnInfo, error) {
-	return a.client.GetTableSchema(ctx, a.clusterName, tableName)
 }

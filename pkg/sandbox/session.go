@@ -14,7 +14,7 @@ import (
 // Session represents a persistent sandbox execution environment.
 type Session struct {
 	ID          string
-	OwnerID     string // GitHub user ID that owns this session
+	OwnerID     string // Optional owner ID for session binding
 	ContainerID string
 	CreatedAt   time.Time
 	LastUsed    time.Time
@@ -107,7 +107,7 @@ func (m *SessionManager) Stop(ctx context.Context) error {
 }
 
 // Create creates a new session and returns its ID.
-// ownerID should be the GitHub user ID of the authenticated user.
+// ownerID is optional - used for session binding when authentication is enabled.
 func (m *SessionManager) Create(containerID string, env map[string]string, ownerID string) (*Session, error) {
 	if !m.cfg.IsEnabled() {
 		return nil, fmt.Errorf("sessions are disabled")
@@ -141,7 +141,7 @@ func (m *SessionManager) Create(containerID string, env map[string]string, owner
 }
 
 // Get retrieves a session by ID and updates its last used timestamp.
-// ownerID should be the GitHub user ID of the authenticated user requesting the session.
+// ownerID is optional - when provided, ownership is verified.
 func (m *SessionManager) Get(sessionID string, ownerID string) (*Session, error) {
 	if !m.cfg.IsEnabled() {
 		return nil, fmt.Errorf("sessions are disabled")
@@ -156,8 +156,8 @@ func (m *SessionManager) Get(sessionID string, ownerID string) (*Session, error)
 		return nil, fmt.Errorf("session %s not found", sessionID)
 	}
 
-	// Verify ownership.
-	if session.OwnerID != ownerID {
+	// Verify ownership if ownerID is provided.
+	if ownerID != "" && session.OwnerID != "" && session.OwnerID != ownerID {
 		m.mu.Unlock()
 
 		return nil, fmt.Errorf("session %s not owned by caller", sessionID)
