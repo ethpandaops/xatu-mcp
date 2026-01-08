@@ -30,12 +30,16 @@ xatu-mcp enables AI assistants to analyze Ethereum blockchain data by providing:
 
 | Resource | Description |
 |----------|-------------|
-| `schema://clusters` | List available ClickHouse clusters |
-| `schema://tables/{cluster}` | List tables in a cluster |
-| `schema://tables/{cluster}/{table}` | Detailed table schema |
-| `examples://queries` | Common query patterns |
-| `networks://available` | Available Ethereum networks |
 | `api://xatu` | Xatu library API documentation |
+| `networks://active` | Compact list of active Ethereum networks and devnet groups |
+| `networks://all` | All Ethereum networks including inactive ones |
+| `networks://{name}` | Details for a specific network (e.g., `networks://mainnet`) |
+| `networks://{group}` | All networks in a devnet group (e.g., `networks://fusaka`) |
+| `examples://queries` | Common query patterns |
+| `datasources://list` | List all Grafana datasources |
+| `datasources://clickhouse` | List ClickHouse datasources |
+| `datasources://prometheus` | List Prometheus datasources |
+| `datasources://loki` | List Loki datasources |
 
 ### Available ClickHouse Clusters
 

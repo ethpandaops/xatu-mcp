@@ -69,12 +69,27 @@ func (b *Builder) Build(ctx context.Context) (Service, error) {
 
 	b.log.Info("Grafana client started")
 
+	// Create cartographoor client for network discovery
+	cartographoorClient := b.buildCartographoor()
+
+	// Start the cartographoor client to fetch initial network data
+	if err := cartographoorClient.Start(ctx); err != nil {
+		// Clean up on failure
+		_ = sandboxSvc.Stop(ctx)
+		_ = grafanaClient.Stop()
+
+		return nil, fmt.Errorf("starting cartographoor client: %w", err)
+	}
+
+	b.log.Info("Cartographoor client started")
+
 	// Create auth service
 	authSvc, err := b.buildAuth()
 	if err != nil {
 		// Clean up on failure
 		_ = sandboxSvc.Stop(ctx)
 		_ = grafanaClient.Stop()
+		_ = cartographoorClient.Stop()
 
 		return nil, fmt.Errorf("building auth: %w", err)
 	}
@@ -84,6 +99,7 @@ func (b *Builder) Build(ctx context.Context) (Service, error) {
 		// Clean up on failure
 		_ = sandboxSvc.Stop(ctx)
 		_ = grafanaClient.Stop()
+		_ = cartographoorClient.Stop()
 
 		return nil, fmt.Errorf("starting auth: %w", err)
 	}
@@ -96,7 +112,7 @@ func (b *Builder) Build(ctx context.Context) (Service, error) {
 	toolReg := b.buildToolRegistry(sandboxSvc, b.cfg.Storage)
 
 	// Create resource registry and register resources
-	resourceReg := b.buildResourceRegistry(grafanaClient)
+	resourceReg := b.buildResourceRegistry(grafanaClient, cartographoorClient)
 
 	// Create and return the server service
 	return NewService(
@@ -163,8 +179,20 @@ func (b *Builder) buildToolRegistry(
 	return reg
 }
 
+// buildCartographoor creates the cartographoor client for network discovery.
+func (b *Builder) buildCartographoor() resource.CartographoorClient {
+	return resource.NewCartographoorClient(b.log, resource.CartographoorConfig{
+		URL:      resource.DefaultCartographoorURL,
+		CacheTTL: resource.DefaultCacheTTL,
+		Timeout:  resource.DefaultHTTPTimeout,
+	})
+}
+
 // buildResourceRegistry creates and populates the resource registry.
-func (b *Builder) buildResourceRegistry(grafanaClient grafana.Client) resource.Registry {
+func (b *Builder) buildResourceRegistry(
+	grafanaClient grafana.Client,
+	cartographoorClient resource.CartographoorClient,
+) resource.Registry {
 	reg := resource.NewRegistry(b.log)
 
 	// Register datasources resources
@@ -174,7 +202,7 @@ func (b *Builder) buildResourceRegistry(grafanaClient grafana.Client) resource.R
 	resource.RegisterExamplesResources(b.log, reg)
 
 	// Register networks resources
-	resource.RegisterNetworksResources(b.log, reg)
+	resource.RegisterNetworksResources(b.log, reg, cartographoorClient)
 
 	// Register API resources
 	resource.RegisterAPIResources(b.log, reg)

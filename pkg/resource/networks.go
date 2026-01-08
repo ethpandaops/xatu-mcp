@@ -3,133 +3,227 @@ package resource
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"regexp"
+	"strings"
 
+	"github.com/ethpandaops/cartographoor/pkg/discovery"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/sirupsen/logrus"
 )
 
-// NetworkInfo contains information about an Ethereum network.
-type NetworkInfo struct {
-	Name                string   `json:"name"`
-	DisplayName         string   `json:"display_name"`
-	ChainID             int      `json:"chain_id"`
-	Description         string   `json:"description"`
-	Clusters            []string `json:"clusters"`
-	GenesisTime         int64    `json:"genesis_time"`
-	SlotDurationSeconds int      `json:"slot_duration_seconds"`
-	SlotsPerEpoch       int      `json:"slots_per_epoch"`
-	IsTestnet           bool     `json:"is_testnet"`
-	IsDevnet            bool     `json:"is_devnet"`
-	BeaconGenesisTime   int64    `json:"beacon_genesis_time"`
+// networkURIPattern matches networks://{name} URIs.
+var networkURIPattern = regexp.MustCompile(`^networks://(.+)$`)
+
+// NetworkSummary is a compact representation for the active networks list.
+type NetworkSummary struct {
+	Name     string   `json:"name"`
+	ChainID  uint64   `json:"chain_id,omitempty"`
+	Clusters []string `json:"clusters"`
+	Status   string   `json:"status"`
 }
 
-// networks contains information about all available Ethereum networks.
-var networks = map[string]NetworkInfo{
-	"mainnet": {
-		Name:                "mainnet",
-		DisplayName:         "Ethereum Mainnet",
-		ChainID:             1,
-		Description:         "The main Ethereum production network",
-		Clusters:            []string{"xatu", "xatu-cbt"},
-		GenesisTime:         1606824023,
-		SlotDurationSeconds: 12,
-		SlotsPerEpoch:       32,
-		IsTestnet:           false,
-		IsDevnet:            false,
-		BeaconGenesisTime:   1606824023,
-	},
-	"sepolia": {
-		Name:                "sepolia",
-		DisplayName:         "Sepolia Testnet",
-		ChainID:             11155111,
-		Description:         "A permissioned testnet for application developers",
-		Clusters:            []string{"xatu", "xatu-cbt"},
-		GenesisTime:         1655733600,
-		SlotDurationSeconds: 12,
-		SlotsPerEpoch:       32,
-		IsTestnet:           true,
-		IsDevnet:            false,
-		BeaconGenesisTime:   1655733600,
-	},
-	"holesky": {
-		Name:                "holesky",
-		DisplayName:         "Holesky Testnet",
-		ChainID:             17000,
-		Description:         "A public testnet for staking, infrastructure, and protocol development",
-		Clusters:            []string{"xatu", "xatu-cbt"},
-		GenesisTime:         1695902400,
-		SlotDurationSeconds: 12,
-		SlotsPerEpoch:       32,
-		IsTestnet:           true,
-		IsDevnet:            false,
-		BeaconGenesisTime:   1695902400,
-	},
-	"hoodi": {
-		Name:                "hoodi",
-		DisplayName:         "Hoodi Testnet",
-		ChainID:             560048,
-		Description:         "A testnet for Pectra testing",
-		Clusters:            []string{"xatu", "xatu-cbt"},
-		GenesisTime:         1742212800,
-		SlotDurationSeconds: 12,
-		SlotsPerEpoch:       32,
-		IsTestnet:           true,
-		IsDevnet:            false,
-		BeaconGenesisTime:   1742212800,
-	},
+// NetworksActiveResponse is the response for networks://active.
+type NetworksActiveResponse struct {
+	Networks []NetworkSummary `json:"networks"`
+	Groups   []string         `json:"groups"`
+	Usage    string           `json:"usage"`
 }
 
-// clusterNetworks maps cluster names to the networks they support.
-var clusterNetworks = map[string][]string{
-	"xatu":              {"mainnet", "sepolia", "holesky", "hoodi"},
-	"xatu-experimental": {"devnets"},
-	"xatu-cbt":          {"mainnet", "sepolia", "holesky", "hoodi"},
+// NetworkWithClusters wraps a discovery.Network with xatu-specific cluster info.
+type NetworkWithClusters struct {
+	discovery.Network
+	Clusters []string `json:"clusters"`
 }
 
-// usageNotes provides guidance on using network data.
-var usageNotes = map[string]string{
-	"querying": "Use meta_network_name = '<network>' in WHERE clauses to filter by network",
-	"mainnet":  "Use 'mainnet' for production Ethereum data",
-	"testnets": "Sepolia and Holesky are the primary testnets for most use cases",
-	"devnets":  "Devnet data is only available on xatu-experimental cluster",
+// NetworksAllResponse is the response for networks://all.
+type NetworksAllResponse struct {
+	Networks map[string]NetworkWithClusters `json:"networks"`
+	Groups   []string                       `json:"groups"`
 }
 
-// networksResponse is the JSON response structure for the networks resource.
-type networksResponse struct {
-	Description     string                 `json:"description"`
-	Networks        map[string]NetworkInfo `json:"networks"`
-	ClusterNetworks map[string][]string    `json:"cluster_networks"`
-	UsageNotes      map[string]string      `json:"usage_notes"`
+// NetworkDetailResponse is the response for networks://{name} (single network).
+type NetworkDetailResponse struct {
+	Network NetworkWithClusters `json:"network"`
 }
 
-// RegisterNetworksResources registers the networks:// resources with the registry.
-func RegisterNetworksResources(log logrus.FieldLogger, reg Registry) {
+// GroupDetailResponse is the response for networks://{group} (devnet group).
+type GroupDetailResponse struct {
+	Group    string                         `json:"group"`
+	Networks map[string]NetworkWithClusters `json:"networks"`
+}
+
+// RegisterNetworksResources registers all network-related resources with the registry.
+func RegisterNetworksResources(log logrus.FieldLogger, reg Registry, client CartographoorClient) {
 	log = log.WithField("resource", "networks")
 
-	// Register static networks://available resource
+	// Register networks://active - compact list of active networks
 	reg.RegisterStatic(StaticResource{
 		Resource: mcp.Resource{
-			URI:         "networks://available",
-			Name:        "Available Networks",
-			Description: "List of available Ethereum networks and their configurations",
+			URI:         "networks://active",
+			Name:        "Active Networks",
+			Description: "Compact list of active Ethereum networks and available devnet groups",
 			MIMEType:    "application/json",
 		},
-		Handler: func(_ context.Context, _ string) (string, error) {
-			response := networksResponse{
-				Description:     "Available Ethereum networks with their configurations and cluster mappings",
-				Networks:        networks,
-				ClusterNetworks: clusterNetworks,
-				UsageNotes:      usageNotes,
+		Handler: createActiveNetworksHandler(client),
+	})
+
+	// Register networks://all - all networks including inactive
+	reg.RegisterStatic(StaticResource{
+		Resource: mcp.Resource{
+			URI:         "networks://all",
+			Name:        "All Networks",
+			Description: "All Ethereum networks including inactive ones",
+			MIMEType:    "application/json",
+		},
+		Handler: createAllNetworksHandler(client),
+	})
+
+	// Register networks://{name} - single network or devnet group
+	reg.RegisterTemplate(TemplateResource{
+		Template: mcp.NewResourceTemplate(
+			"networks://{name}",
+			"Network or Group Details",
+			mcp.WithTemplateDescription("Get details for a specific network or all networks in a devnet group"),
+			mcp.WithTemplateMIMEType("application/json"),
+		),
+		Handler: createNetworkDetailHandler(log, client),
+	})
+
+	log.Debug("Registered networks resources")
+}
+
+// createActiveNetworksHandler returns a handler for networks://active.
+func createActiveNetworksHandler(client CartographoorClient) ReadHandler {
+	return func(_ context.Context, _ string) (string, error) {
+		networks := client.GetActiveNetworks()
+		groups := client.GetGroups()
+
+		summaries := make([]NetworkSummary, 0, len(networks))
+
+		for _, network := range networks {
+			summaries = append(summaries, NetworkSummary{
+				Name:     network.Name,
+				ChainID:  network.ChainID,
+				Clusters: client.GetClusters(network),
+				Status:   network.Status,
+			})
+		}
+
+		response := NetworksActiveResponse{
+			Networks: summaries,
+			Groups:   groups,
+			Usage:    "Use networks://{name} for full network details or networks://{group} for all networks in a devnet group",
+		}
+
+		data, err := json.MarshalIndent(response, "", "  ")
+		if err != nil {
+			return "", fmt.Errorf("marshaling response: %w", err)
+		}
+
+		return string(data), nil
+	}
+}
+
+// createAllNetworksHandler returns a handler for networks://all.
+func createAllNetworksHandler(client CartographoorClient) ReadHandler {
+	return func(_ context.Context, _ string) (string, error) {
+		networks := client.GetAllNetworks()
+		groups := client.GetGroups()
+
+		networksWithClusters := make(map[string]NetworkWithClusters, len(networks))
+
+		for name, network := range networks {
+			networksWithClusters[name] = NetworkWithClusters{
+				Network:  network,
+				Clusters: client.GetClusters(network),
+			}
+		}
+
+		response := NetworksAllResponse{
+			Networks: networksWithClusters,
+			Groups:   groups,
+		}
+
+		data, err := json.MarshalIndent(response, "", "  ")
+		if err != nil {
+			return "", fmt.Errorf("marshaling response: %w", err)
+		}
+
+		return string(data), nil
+	}
+}
+
+// createNetworkDetailHandler returns a handler for networks://{name}.
+func createNetworkDetailHandler(log logrus.FieldLogger, client CartographoorClient) ReadHandler {
+	return func(_ context.Context, uri string) (string, error) {
+		matches := networkURIPattern.FindStringSubmatch(uri)
+		if len(matches) != 2 {
+			return "", fmt.Errorf("invalid URI format: %s", uri)
+		}
+
+		name := matches[1]
+
+		// Try exact network match first
+		if network, ok := client.GetNetwork(name); ok {
+			response := NetworkDetailResponse{
+				Network: NetworkWithClusters{
+					Network:  network,
+					Clusters: client.GetClusters(network),
+				},
 			}
 
 			data, err := json.MarshalIndent(response, "", "  ")
 			if err != nil {
-				return "", err
+				return "", fmt.Errorf("marshaling response: %w", err)
 			}
 
 			return string(data), nil
-		},
-	})
+		}
 
-	log.Debug("Registered networks resources")
+		// Try group match
+		if networks, ok := client.GetGroup(name); ok {
+			networksWithClusters := make(map[string]NetworkWithClusters, len(networks))
+
+			for netName, network := range networks {
+				networksWithClusters[netName] = NetworkWithClusters{
+					Network:  network,
+					Clusters: client.GetClusters(network),
+				}
+			}
+
+			response := GroupDetailResponse{
+				Group:    name,
+				Networks: networksWithClusters,
+			}
+
+			data, err := json.MarshalIndent(response, "", "  ")
+			if err != nil {
+				return "", fmt.Errorf("marshaling response: %w", err)
+			}
+
+			return string(data), nil
+		}
+
+		// Not found - provide helpful error
+		groups := client.GetGroups()
+		allNetworks := client.GetAllNetworks()
+		networkNames := make([]string, 0, len(allNetworks))
+
+		for netName := range allNetworks {
+			networkNames = append(networkNames, netName)
+		}
+
+		log.WithFields(logrus.Fields{
+			"requested": name,
+			"networks":  len(networkNames),
+			"groups":    len(groups),
+		}).Debug("Network or group not found")
+
+		return "", fmt.Errorf(
+			"network or group %q not found. Available groups: %s",
+			name,
+			strings.Join(groups, ", "),
+		)
+	}
 }
