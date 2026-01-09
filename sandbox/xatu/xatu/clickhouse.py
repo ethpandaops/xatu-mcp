@@ -19,6 +19,21 @@ from typing import Any
 import httpx
 import pandas as pd
 
+
+class ClickHouseError(Exception):
+    """Error from ClickHouse query execution with actionable suggestions."""
+
+    def __init__(self, message: str, suggestion: str | None = None):
+        self.message = message
+        self.suggestion = suggestion
+        super().__init__(self._format())
+
+    def _format(self) -> str:
+        parts = [f"ClickHouse Error: {self.message}"]
+        if self.suggestion:
+            parts.append(f"Suggestion: {self.suggestion}")
+        return "\n".join(parts)
+
 # Grafana configuration from environment variables
 _GRAFANA_URL = os.environ.get("XATU_GRAFANA_URL", "")
 _GRAFANA_TOKEN = os.environ.get("XATU_GRAFANA_TOKEN", "")
@@ -184,10 +199,49 @@ def query(
     }
 
     with _get_client() as client:
-        resp = client.post("/api/ds/query", json=body)
-        resp.raise_for_status()
+        try:
+            resp = client.post("/api/ds/query", json=body)
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            _raise_query_error(e, datasource_uid)
 
         return _parse_grafana_response(resp.json())
+
+
+def _raise_query_error(error: httpx.HTTPStatusError, datasource_uid: str) -> None:
+    """Convert HTTP errors to actionable ClickHouseError exceptions."""
+    status = error.response.status_code
+    schema_hint = (
+        f"Use clickhouse-schema://{{cluster}}/{{table}} resource to find the "
+        f"partition key for your table."
+    )
+
+    if status == 504:
+        raise ClickHouseError(
+            "Query timed out (504 Gateway Timeout)",
+            f"Ensure you're filtering by the table's partition column to avoid "
+            f"full table scans. {schema_hint}",
+        ) from error
+    elif status == 502:
+        raise ClickHouseError(
+            "Database temporarily unavailable (502 Bad Gateway)",
+            f"This is usually temporary. Wait 10 seconds and retry. "
+            f"If persistent, check that your query filters on the partition column. {schema_hint}",
+        ) from error
+    elif status == 400:
+        # Try to extract actual error from response
+        try:
+            detail = error.response.text
+        except Exception:
+            detail = "Bad request"
+        raise ClickHouseError(
+            f"Query error (400): {detail}",
+            f"Check column names and types against clickhouse-schema://{{cluster}}/{{table}} resource.",
+        ) from error
+    else:
+        raise ClickHouseError(
+            f"HTTP error {status}: {error.response.text}",
+        ) from error
 
 
 def _parse_grafana_response(data: dict) -> pd.DataFrame:

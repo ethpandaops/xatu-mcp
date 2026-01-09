@@ -7,11 +7,11 @@ Example:
     from xatu import storage
 
     # Upload a file
-    url = storage.upload("/output/chart.png")
+    url = storage.upload("/workspace/chart.png")
     print(f"Chart available at: {url}")
 
     # Upload with custom name
-    url = storage.upload("/output/data.csv", remote_name="results.csv")
+    url = storage.upload("/workspace/data.csv", remote_name="results.csv")
 """
 
 import os
@@ -60,8 +60,8 @@ def upload(local_path: str, remote_name: str | None = None) -> str:
         ValueError: If S3 is not configured.
 
     Example:
-        >>> url = upload("/output/chart.png")
-        >>> url = upload("/output/data.csv", remote_name="analysis_results.csv")
+        >>> url = upload("/workspace/chart.png")
+        >>> url = upload("/workspace/data.csv", remote_name="analysis_results.csv")
     """
     path = Path(local_path)
 

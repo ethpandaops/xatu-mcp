@@ -5,15 +5,20 @@
 #   docker-compose up -d mcp-server   # Start just the MCP server
 #   docker-compose logs -f mcp-server # View server logs
 #
-# Required environment variables:
-#   CLICKHOUSE_USER     - ClickHouse username
-#   CLICKHOUSE_PASSWORD - ClickHouse password
-#
 # Optional environment variables (with defaults):
 #   MINIO_ACCESS_KEY    - MinIO access key (default: minioadmin)
 #   MINIO_SECRET_KEY    - MinIO secret key (default: minioadmin)
 
 services:
+  # Build-only service to ensure sandbox image is available
+  # This runs "true" and exits immediately - we just need the image built
+  sandbox-builder:
+    build:
+      context: ./sandbox
+    image: xatu-mcp-sandbox:latest
+    command: "true"
+    restart: "no"
+
   mcp-server:
     build:
       context: .
@@ -27,8 +32,7 @@ services:
       - "9090:9090"   # Metrics
     environment:
       - CONFIG_PATH=/config/config.yaml
-      - CLICKHOUSE_USER=${CLICKHOUSE_USER:?CLICKHOUSE_USER is required}
-      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD is required}
+      - GRAFANA_SERVICE_TOKEN=${GRAFANA_SERVICE_TOKEN}
       - S3_ENDPOINT=http://minio:9000
       - S3_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
       - S3_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
@@ -38,11 +42,12 @@ services:
       - ./config.yaml:/config/config.yaml:ro
       - /var/run/docker.sock:/var/run/docker.sock
       - /tmp/xatu-mcp-sandbox:/tmp/xatu-mcp-sandbox  # Shared with sandbox containers
-      - mcp-output:/output
     networks:
       - mcp-external
       - mcp-internal
     depends_on:
+      sandbox-builder:
+        condition: service_completed_successfully
       minio:
         condition: service_healthy
     restart: unless-stopped
@@ -97,4 +102,3 @@ networks:
 
 volumes:
   minio-data:
-  mcp-output:

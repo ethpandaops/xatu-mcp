@@ -23,7 +23,7 @@ xatu-mcp enables AI assistants to analyze Ethereum blockchain data by providing:
 | Tool | Description |
 |------|-------------|
 | `execute_python` | Execute Python code in an isolated sandbox with the `xatu` library |
-| `list_output_files` | List files generated in the `/output` directory |
+| `list_output_files` | List files generated in the `/workspace` directory |
 | `get_output_file` | Retrieve content or URLs for output files |
 
 ### Resources
@@ -198,16 +198,16 @@ logs = loki.query('{job="beacon"}')
 import matplotlib.pyplot as plt
 plt.figure(figsize=(10, 6))
 plt.plot(df['slot'], df['proposer_index'])
-plt.savefig('/output/chart.png')
+plt.savefig('/workspace/chart.png')
 
 # Upload to get a public URL
-url = storage.upload('/output/chart.png')
+url = storage.upload('/workspace/chart.png')
 print(f"Chart: {url}")
 ```
 
 ### Output Files
 
-All output files should be written to `/output/`. Files are automatically tracked and can be uploaded to S3 for public access.
+All output files should be written to `/workspace/`. Files are automatically tracked and can be uploaded to S3 for public access.
 
 ## Authentication
 

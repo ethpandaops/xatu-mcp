@@ -129,28 +129,39 @@ func NewClickHouseSchemaClient(
 }
 
 // Start initializes the client and starts background refresh.
+// The initial schema fetch runs asynchronously to avoid blocking server startup.
 func (c *clickhouseSchemaClient) Start(ctx context.Context) error {
 	c.log.WithField("refresh_interval", c.cfg.RefreshInterval).Info("Starting ClickHouse schema client")
 
-	// Initial fetch
-	if err := c.refresh(ctx); err != nil {
-		return fmt.Errorf("initial schema fetch failed: %w", err)
-	}
-
-	// Start background refresh
+	// Start background refresh (includes initial fetch)
 	c.wg.Add(1)
 
 	go c.backgroundRefresh()
 
-	tableCount := 0
-	for _, cluster := range c.clusters {
-		tableCount += len(cluster.Tables)
-	}
+	// Trigger immediate initial fetch
+	go func() {
+		fetchCtx, cancel := context.WithTimeout(context.Background(), c.cfg.QueryTimeout*10)
+		defer cancel()
 
-	c.log.WithFields(logrus.Fields{
-		"cluster_count": len(c.clusters),
-		"table_count":   tableCount,
-	}).Info("ClickHouse schema client started")
+		if err := c.refresh(fetchCtx); err != nil {
+			c.log.WithError(err).Warn("Initial schema fetch failed, will retry on next refresh interval")
+		} else {
+			tableCount := 0
+
+			c.mu.RLock()
+			for _, cluster := range c.clusters {
+				tableCount += len(cluster.Tables)
+			}
+			c.mu.RUnlock()
+
+			c.log.WithFields(logrus.Fields{
+				"cluster_count": len(c.clusters),
+				"table_count":   tableCount,
+			}).Info("Initial ClickHouse schema fetch completed")
+		}
+	}()
+
+	c.log.Info("ClickHouse schema client started (fetching schema in background)")
 
 	return nil
 }
@@ -432,6 +443,11 @@ func (c *clickhouseSchemaClient) fetchTableList(ctx context.Context, uid string)
 		for _, field := range frame.Fields {
 			for _, value := range field.Values {
 				if tableName, ok := value.(string); ok && tableName != "" {
+					// Skip tables with _local suffix (internal ClickHouse distributed table shards)
+					if strings.HasSuffix(tableName, "_local") {
+						continue
+					}
+
 					tables = append(tables, tableName)
 				}
 			}

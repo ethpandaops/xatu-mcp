@@ -87,6 +87,7 @@ func RegisterNetworksResources(log logrus.FieldLogger, reg Registry, client Cart
 			mcp.WithTemplateDescription("Get details for a specific network or all networks in a devnet group"),
 			mcp.WithTemplateMIMEType("application/json"),
 		),
+		Pattern: networkURIPattern,
 		Handler: createNetworkDetailHandler(log, client),
 	})
 

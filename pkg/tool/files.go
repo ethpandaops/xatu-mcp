@@ -32,7 +32,7 @@ Output files are uploaded from within sandbox code using xatu.storage:
 from xatu import storage
 
 # Upload a file and get its URL
-url = storage.upload("/output/chart.png")
+url = storage.upload("/workspace/chart.png")
 print(f"Chart: {url}")
 ` + "```" + `
 
@@ -107,10 +107,10 @@ df = clickhouse.query("mainnet", "SELECT * FROM beacon_api_eth_v1_events_block L
 # Create visualization
 plt.figure(figsize=(10, 6))
 plt.plot(df['slot'], df['block'])
-plt.savefig('/output/blocks.png')
+plt.savefig('/workspace/blocks.png')
 
 # Upload and get URL
-url = storage.upload('/output/blocks.png')
+url = storage.upload('/workspace/blocks.png')
 print(f"Chart: {url}")
 ` + "```"
 
@@ -140,11 +140,11 @@ Example:
 ` + "```python" + `
 from xatu import storage
 
-# Save your file to /output
-plt.savefig('/output/chart.png')
+# Save your file to /workspace
+plt.savefig('/workspace/chart.png')
 
 # Upload and get URL
-url = storage.upload('/output/chart.png')
+url = storage.upload('/workspace/chart.png')
 print(f"Chart URL: {url}")
 ` + "```" + `
 

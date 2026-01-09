@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ethpandaops/xatu-mcp/pkg/auth"
@@ -13,6 +14,18 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/sirupsen/logrus"
 )
+
+// sessionsWithResourceTip tracks sessions that have already seen the resource tip.
+var sessionsWithResourceTip sync.Map
+
+// resourceTipMessage is shown after the first execution in a session to guide users to MCP resources.
+const resourceTipMessage = `
+💡 TIP: Read these MCP resources for available datasources and schemas:
+   - datasources://list - available datasource UIDs
+   - datasources://clickhouse - ClickHouse datasources only
+   - clickhouse-schema://{cluster}/{table} - table schema (if schema discovery enabled)
+   - api://xatu - Python library documentation
+   - networks://active - available networks`
 
 const (
 	// ExecutePythonToolName is the name of the execute_python tool.
@@ -49,10 +62,10 @@ logs = loki.query("datasource-uid", '{app="beacon-node"}', limit=100)
 import matplotlib.pyplot as plt
 plt.figure(figsize=(10, 6))
 plt.plot(df['slot'], df['block_root'])
-plt.savefig('/output/chart.png')
+plt.savefig('/workspace/chart.png')
 
 # Upload to get a URL
-url = storage.upload('/output/chart.png')
+url = storage.upload('/workspace/chart.png')
 print(f"Chart: {url}")
 ` + "```" + `
 
@@ -63,7 +76,7 @@ Use the datasources://list resource to discover available datasources and their 
 When sessions are enabled, the execution environment persists between calls:
 - Files written to /workspace/ persist across executions in the same session
 - The first execution returns a session_id in the response that can be reused
-- Sessions auto-expire after inactivity (default: 10 minutes)
+- Sessions auto-expire after inactivity (default: 30 minutes)
 
 Example workflow:
 1. First call (no session_id): Query data and save to /workspace/
@@ -82,7 +95,7 @@ df = pd.read_parquet('/workspace/data.parquet')  # File exists!
 print(f"Loaded {len(df)} rows")
 ` + "```" + `
 
-All output files should be written to /output/ directory.
+All output files should be written to /workspace/ directory.
 Data stays in the sandbox - Claude only sees stdout, file metadata, and URLs.`
 
 // NewExecutePythonTool creates the execute_python tool definition.
@@ -184,7 +197,17 @@ func newExecutePythonHandler(
 		}
 
 		// Format the response.
-		response := formatExecutionResult(result)
+		response := formatExecutionResult(result, cfg)
+
+		// Show resource tip after the first execution in a session.
+		sessionKey := result.SessionID
+		if sessionKey == "" {
+			sessionKey = result.ExecutionID // Use execution ID if no session
+		}
+
+		if _, alreadyShown := sessionsWithResourceTip.LoadOrStore(sessionKey, true); !alreadyShown {
+			response += resourceTipMessage
+		}
 
 		handlerLog.WithFields(logrus.Fields{
 			"execution_id": result.ExecutionID,
@@ -199,53 +222,49 @@ func newExecutePythonHandler(
 }
 
 // formatExecutionResult formats the execution result into a string.
-func formatExecutionResult(result *sandbox.ExecutionResult) string {
+func formatExecutionResult(result *sandbox.ExecutionResult, cfg *config.Config) string {
 	var parts []string
 
 	if result.Stdout != "" {
-		parts = append(parts, fmt.Sprintf("=== STDOUT ===\n%s", result.Stdout))
+		parts = append(parts, fmt.Sprintf("[stdout]\n%s", result.Stdout))
 	}
 
 	if result.Stderr != "" {
-		parts = append(parts, fmt.Sprintf("=== STDERR ===\n%s", result.Stderr))
+		parts = append(parts, fmt.Sprintf("[stderr]\n%s", result.Stderr))
 	}
 
 	if len(result.OutputFiles) > 0 {
-		filesList := make([]string, 0, len(result.OutputFiles))
-		for _, f := range result.OutputFiles {
-			filesList = append(filesList, fmt.Sprintf("  - %s", f))
-		}
-
-		parts = append(parts,
-			fmt.Sprintf("=== OUTPUT FILES ===\n%s\n"+
-				"Note: Use storage.upload('/output/filename') in code to get URLs",
-				strings.Join(filesList, "\n")),
-		)
+		parts = append(parts, fmt.Sprintf("[files] %s", strings.Join(result.OutputFiles, ", ")))
 	}
 
 	// Include session info if available.
 	if result.SessionID != "" {
-		sessionInfo := fmt.Sprintf("=== SESSION ===\nSession ID: %s\nTTL Remaining: %s",
+		sessionInfo := fmt.Sprintf("[session] id=%s ttl=%s",
 			result.SessionID, result.SessionTTLRemaining.Round(time.Second))
 
 		if len(result.SessionFiles) > 0 {
-			sessionInfo += "\nWorkspace Files:"
-
+			workspaceFiles := make([]string, 0, len(result.SessionFiles))
 			for _, f := range result.SessionFiles {
-				sessionInfo += fmt.Sprintf("\n  - %s (%s, modified %s)",
-					f.Name, formatSize(f.Size), f.Modified.Format(time.RFC3339))
+				workspaceFiles = append(workspaceFiles, fmt.Sprintf("%s(%s)", f.Name, formatSize(f.Size)))
 			}
+
+			sessionInfo += fmt.Sprintf(" workspace=[%s]", strings.Join(workspaceFiles, ", "))
 		}
 
-		sessionInfo += "\n\nTip: Pass session_id in subsequent calls to reuse this session"
 		parts = append(parts, sessionInfo)
 	}
 
-	parts = append(parts, fmt.Sprintf("=== EXIT CODE: %d ===", result.ExitCode))
-	parts = append(parts, fmt.Sprintf("=== EXECUTION ID: %s ===", result.ExecutionID))
-	parts = append(parts, fmt.Sprintf("=== DURATION: %.2fs ===", result.DurationSeconds))
+	parts = append(parts, fmt.Sprintf("[exit=%d duration=%.2fs id=%s]",
+		result.ExitCode, result.DurationSeconds, result.ExecutionID))
 
-	return strings.Join(parts, "\n\n")
+	// Add note about localhost URLs if storage is configured with localhost.
+	if cfg.Storage != nil && strings.Contains(cfg.Storage.PublicURLPrefix, "localhost") {
+		if strings.Contains(result.Stdout, "localhost") {
+			parts = append(parts, "[note] Storage URLs use localhost - these are accessible if running the server locally.")
+		}
+	}
+
+	return strings.Join(parts, "\n")
 }
 
 // formatSize formats a byte size into a human-readable string.

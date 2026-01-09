@@ -19,21 +19,35 @@ grafana:
   # If specified, only these datasources are exposed
   # Each datasource can have a description that provides context for the LLM
   datasources:
-    - uid: "your-clickhouse-uid"
+    # Main Xatu cluster - raw event data
+    - uid: "your-xatu-clickhouse-uid"
       description: |
-        ClickHouse database containing Xatu data.
-        Always filter by partition key to avoid full table scans.
-        Use CTEs for distributed queries. Avoid global joins.
+        Main Xatu ClickHouse cluster with raw Ethereum event data.
+        Contains beacon chain events (blocks, attestations, blob sidecars, etc.)
+        and execution layer data across mainnet, sepolia, holesky networks.
+        IMPORTANT: Always filter by slot_start_date_time (partition key) AND meta_network_name.
+        Use clickhouse-schema://xatu/{table} to discover available tables and columns.
+
+    # Pre-aggregated CBT data
+    - uid: "your-xatu-cbt-clickhouse-uid"
+      description: |
+        Xatu CBT (Consensus Block Timing) cluster with pre-aggregated timing data.
+        Contains block timing analysis, attestation accuracy by entity, and
+        validator performance metrics. Faster queries than raw data.
+        Tables are partitioned by slot_start_date_time. Always include time filters.
+        Use clickhouse-schema://xatu-cbt/{table} to discover available tables.
 
     - uid: "your-loki-uid"
       description: |
-        Loki cluster for container logs.
+        Loki cluster for beacon node and validator logs.
         Must filter by label (e.g., ingress_user, container, pod, namespace).
+        Common queries: error patterns, consensus issues, peer connectivity.
 
     - uid: "your-prometheus-uid"
       description: |
-        Prometheus/VictoriaMetrics for metrics.
-        Common labels: ingress_user, container, pod, namespace.
+        Prometheus/VictoriaMetrics for infrastructure metrics.
+        Contains beacon node metrics, validator metrics, and system health data.
+        Common labels: ingress_user, container, pod, namespace, instance.
 
 # Sandbox configuration
 sandbox:
@@ -49,9 +63,9 @@ sandbox:
   # When enabled, sandbox containers persist between calls
   # session:
   #   enabled: true
-  #   ttl: 10m        # idle timeout
-  #   max_duration: 1h  # absolute max session lifetime
-  #   max_sessions: 10  # max concurrent sessions
+  #   ttl: 30m          # idle timeout (default: 30m)
+  #   max_duration: 4h  # absolute max session lifetime (default: 4h)
+  #   max_sessions: 10  # max concurrent sessions (default: 10)
 
 # S3-compatible storage for output files
 storage:

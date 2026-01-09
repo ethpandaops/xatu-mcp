@@ -134,7 +134,7 @@ func (b *Builder) Build(ctx context.Context) (Service, error) {
 	}
 
 	// Create tool registry and register tools
-	toolReg := b.buildToolRegistry(sandboxSvc, b.cfg.Storage)
+	toolReg := b.buildToolRegistry(sandboxSvc)
 
 	// Create resource registry and register resources
 	resourceReg := b.buildResourceRegistry(grafanaClient, cartographoorClient, schemaClient)
@@ -183,10 +183,7 @@ func (b *Builder) buildAuth() (auth.SimpleService, error) {
 }
 
 // buildToolRegistry creates and populates the tool registry.
-func (b *Builder) buildToolRegistry(
-	sandboxSvc sandbox.Service,
-	storageCfg *config.StorageConfig,
-) tool.Registry {
+func (b *Builder) buildToolRegistry(sandboxSvc sandbox.Service) tool.Registry {
 	reg := tool.NewRegistry(b.log)
 
 	// Register execute_python tool
@@ -195,19 +192,6 @@ func (b *Builder) buildToolRegistry(
 	// Register file tools
 	reg.Register(tool.NewListOutputFilesTool(b.log))
 	reg.Register(tool.NewGetOutputFileTool(b.log))
-
-	// Register get_image tool if storage is configured
-	if storageCfg != nil && storageCfg.PublicURLPrefix != "" {
-		reg.Register(tool.NewGetImageTool(b.log, tool.GetImageConfig{
-			PublicURLPrefix:   storageCfg.PublicURLPrefix,
-			InternalURLPrefix: storageCfg.InternalURLPrefix,
-		}))
-
-		b.log.WithFields(logrus.Fields{
-			"public_url_prefix":   storageCfg.PublicURLPrefix,
-			"internal_url_prefix": storageCfg.InternalURLPrefix,
-		}).Debug("Registered get_image tool")
-	}
 
 	// Register search_examples tool
 	reg.Register(tool.NewSearchExamplesTool(b.log))

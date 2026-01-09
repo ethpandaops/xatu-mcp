@@ -268,7 +268,7 @@ func applyDefaults(cfg *Config) {
 
 	// Session defaults.
 	if cfg.Sandbox.Sessions.TTL == 0 {
-		cfg.Sandbox.Sessions.TTL = 10 * time.Minute
+		cfg.Sandbox.Sessions.TTL = 30 * time.Minute
 	}
 
 	if cfg.Sandbox.Sessions.MaxDuration == 0 {
@@ -290,7 +290,7 @@ func applyDefaults(cfg *Config) {
 }
 
 // MaxSandboxTimeout is the maximum allowed sandbox timeout in seconds.
-const MaxSandboxTimeout = 300
+const MaxSandboxTimeout = 600
 
 // Validate validates the configuration.
 func (c *Config) Validate() error {
