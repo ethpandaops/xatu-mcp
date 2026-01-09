@@ -1,0 +1,195 @@
+name: LLM Evaluation
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: 'Claude model to evaluate'
+        required: true
+        default: 'claude-sonnet-4-5'
+        type: choice
+        options:
+          - claude-sonnet-4-5
+          - claude-opus-4-5
+          - claude-haiku-4-5
+      category:
+        description: 'Test category (empty for all)'
+        required: false
+        type: string
+      markers:
+        description: 'pytest markers (e.g., "visualization" or "not slow")'
+        required: false
+        type: string
+      verbose:
+        description: 'Enable verbose output'
+        required: false
+        default: false
+        type: boolean
+
+  schedule:
+    # Run daily at 6am UTC with Sonnet
+    - cron: '0 6 * * *'
+
+  # Allow triggering from other workflows
+  workflow_call:
+    inputs:
+      model:
+        required: false
+        default: 'claude-sonnet-4-5'
+        type: string
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Install Python dependencies
+        working-directory: tests/eval
+        run: uv sync
+
+      - name: Build xatu-mcp server
+        run: go build -o xatu-mcp ./cmd/xatu-mcp
+
+      - name: Create CI config
+        run: |
+          cat > config.ci.yaml << 'EOF'
+          server:
+            host: "0.0.0.0"
+            port: 8080
+
+          auth:
+            enabled: false
+
+          grafana:
+            url: "${{ secrets.GRAFANA_URL }}"
+            api_key: "${{ secrets.GRAFANA_API_KEY }}"
+
+          sandbox:
+            image: "ghcr.io/ethpandaops/xatu-mcp-sandbox:latest"
+
+          storage:
+            type: "s3"
+            s3:
+              bucket: "${{ secrets.S3_BUCKET }}"
+              region: "${{ secrets.S3_REGION }}"
+              endpoint: "${{ secrets.S3_ENDPOINT }}"
+              access_key_id: "${{ secrets.S3_ACCESS_KEY_ID }}"
+              secret_access_key: "${{ secrets.S3_SECRET_ACCESS_KEY }}"
+          EOF
+
+      - name: Start xatu-mcp server
+        run: |
+          ./xatu-mcp serve --config config.ci.yaml &
+          # Wait for server to be ready
+          for i in {1..30}; do
+            if curl -s http://localhost:8080/health > /dev/null 2>&1; then
+              echo "Server is ready"
+              break
+            fi
+            echo "Waiting for server... ($i/30)"
+            sleep 2
+          done
+
+      - name: Run evaluation
+        working-directory: tests/eval
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          XATU_EVAL_XATU_MCP_URL: http://localhost:8080
+          XATU_EVAL_MODEL: ${{ inputs.model || 'claude-sonnet-4-5' }}
+          XATU_EVAL_VERBOSE: ${{ inputs.verbose || 'false' }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}  # For DeepEval metrics
+        run: |
+          PYTEST_ARGS="tests/"
+
+          if [ -n "${{ inputs.category }}" ]; then
+            PYTEST_ARGS="$PYTEST_ARGS -k '${{ inputs.category }}'"
+          fi
+
+          if [ -n "${{ inputs.markers }}" ]; then
+            PYTEST_ARGS="$PYTEST_ARGS -m '${{ inputs.markers }}'"
+          fi
+
+          if [ "${{ inputs.verbose }}" = "true" ]; then
+            PYTEST_ARGS="$PYTEST_ARGS -v -s"
+          fi
+
+          # Run pytest with JUnit XML output for GitHub Actions
+          uv run python -m pytest $PYTEST_ARGS \
+            --junitxml=reports/junit.xml \
+            --tb=short \
+            || true  # Don't fail immediately, we want to upload results
+
+      - name: Generate report
+        if: always()
+        working-directory: tests/eval
+        run: |
+          mkdir -p reports
+          # Generate summary if we have results
+          if [ -f reports/junit.xml ]; then
+            echo "# Evaluation Results" > reports/summary.md
+            echo "" >> reports/summary.md
+            echo "**Model:** ${{ inputs.model || 'claude-sonnet-4-5' }}" >> reports/summary.md
+            echo "**Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> reports/summary.md
+            echo "" >> reports/summary.md
+          fi
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-results-${{ inputs.model || 'claude-sonnet-4-5' }}-${{ github.run_id }}
+          path: |
+            tests/eval/reports/
+            tests/eval/snapshots/
+          retention-days: 30
+
+      - name: Publish Test Results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        if: always()
+        with:
+          files: tests/eval/reports/junit.xml
+          check_name: "LLM Evaluation Results (${{ inputs.model || 'claude-sonnet-4-5' }})"
+          comment_mode: always
+
+  compare-models:
+    runs-on: ubuntu-latest
+    needs: evaluate
+    if: github.event_name == 'workflow_dispatch' && inputs.model == 'claude-sonnet-4-5'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Sonnet results
+        uses: actions/download-artifact@v4
+        with:
+          name: eval-results-claude-sonnet-4-5-${{ github.run_id }}
+          path: results/sonnet
+
+      - name: Summary
+        run: |
+          echo "## Model Comparison" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Results from evaluation run:" >> $GITHUB_STEP_SUMMARY
+          echo "- Model: ${{ inputs.model || 'claude-sonnet-4-5' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Run ID: ${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY

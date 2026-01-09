@@ -27,6 +27,9 @@ const (
 // searchExamplesDescription describes the search_examples tool.
 const searchExamplesDescription = `Search through ClickHouse query examples by keyword, regex pattern, or category.
 
+⚠️ TIP: Read xatu://getting-started resource for an overview of available tables and required filters.
+Always search for examples BEFORE writing queries - they show correct table/column names and filters.
+
 Searches across:
 - Example names
 - Example descriptions

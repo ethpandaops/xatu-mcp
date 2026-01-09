@@ -137,7 +137,7 @@ func (b *Builder) Build(ctx context.Context) (Service, error) {
 	toolReg := b.buildToolRegistry(sandboxSvc)
 
 	// Create resource registry and register resources
-	resourceReg := b.buildResourceRegistry(grafanaClient, cartographoorClient, schemaClient)
+	resourceReg := b.buildResourceRegistry(grafanaClient, cartographoorClient, schemaClient, toolReg)
 
 	// Create and return the server service
 	return NewService(
@@ -189,10 +189,6 @@ func (b *Builder) buildToolRegistry(sandboxSvc sandbox.Service) tool.Registry {
 	// Register execute_python tool
 	reg.Register(tool.NewExecutePythonTool(b.log, sandboxSvc, b.cfg))
 
-	// Register file tools
-	reg.Register(tool.NewListOutputFilesTool(b.log))
-	reg.Register(tool.NewGetOutputFileTool(b.log))
-
 	// Register search_examples tool
 	reg.Register(tool.NewSearchExamplesTool(b.log))
 
@@ -240,6 +236,7 @@ func (b *Builder) buildResourceRegistry(
 	grafanaClient grafana.Client,
 	cartographoorClient resource.CartographoorClient,
 	schemaClient resource.ClickHouseSchemaClient,
+	toolReg tool.Registry,
 ) resource.Registry {
 	reg := resource.NewRegistry(b.log)
 
@@ -254,6 +251,9 @@ func (b *Builder) buildResourceRegistry(
 
 	// Register API resources
 	resource.RegisterAPIResources(b.log, reg)
+
+	// Register getting-started resource (needs tool registry for dynamic content)
+	resource.RegisterGettingStartedResources(b.log, reg, toolReg)
 
 	// Register ClickHouse schema resources if schema discovery is enabled
 	if schemaClient != nil {

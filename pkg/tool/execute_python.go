@@ -41,6 +41,9 @@ const (
 // executePythonDescription is the detailed description of the execute_python tool.
 const executePythonDescription = `Execute Python code in a sandboxed environment.
 
+⚠️ IMPORTANT: Read xatu://getting-started resource first for query patterns and required filters.
+Use the search_examples tool to find example queries before writing your own.
+
 The xatu library is pre-installed for querying Ethereum network data via Grafana:
 
 ` + "```python" + `

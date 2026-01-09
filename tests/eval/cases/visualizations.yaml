@@ -1,0 +1,22 @@
+# Visualization test cases for xatu-mcp evaluation
+# These test chart generation and visualization output
+
+- id: block_time_histogram
+  description: Generate a histogram of block times
+  input: "Create a histogram showing the distribution of block arrival times for the last 1000 blocks on mainnet."
+  expected_tools:
+    - mcp__xatu__execute_python
+  metrics:
+    tool_correctness: 0.8
+    task_completion: 0.7
+    visualization_url: 0.8
+  network: mainnet
+  expected_tables:
+    - libp2p_gossipsub_beacon_block
+    - fct_block_first_seen_by_node
+    - beacon_api_eth_v1_events_block
+  require_all_tables: false
+  tags:
+    - visualization
+    - histogram
+    - timing

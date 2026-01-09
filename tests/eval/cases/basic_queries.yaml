@@ -1,0 +1,73 @@
+# Basic query test cases for xatu-mcp evaluation
+# These test single-turn queries against Ethereum network data
+
+- id: block_count_24h
+  description: Query block production count for last 24 hours
+  input: "How many blocks were produced on mainnet in the last 24 hours?"
+  expected_tools:
+    - mcp__xatu__execute_python
+  metrics:
+    tool_correctness: 0.8
+    task_completion: 0.7
+    data_plausibility: 0.9
+  network: mainnet
+  tags:
+    - basic
+    - blocks
+  # Data source validation: must use canonical_beacon_block or beacon_api_eth_v1_events_block
+  expected_tables:
+    - canonical_beacon_block
+    - beacon_api_eth_v1_events_block
+  expected_datasource: clickhouse
+  require_all_tables: false  # Either table is acceptable
+
+- id: slot_time_stats
+  description: Query slot timing statistics
+  input: "What is the average block arrival time for the last 1000 slots on mainnet?"
+  expected_tools:
+    - mcp__xatu__execute_python
+  metrics:
+    tool_correctness: 0.8
+    task_completion: 0.7
+    data_plausibility: 0.8
+  network: mainnet
+  tags:
+    - basic
+    - timing
+  expected_tables:
+    - beacon_api_eth_v1_events_block
+    - libp2p_gossipsub_beacon_block
+    - fct_block_first_seen_by_node
+  require_all_tables: false  # Either table is acceptable
+
+- id: validator_count
+  description: Query total validator count
+  input: "How many active validators are there on mainnet right now?"
+  expected_tools:
+    - mcp__xatu__execute_python
+  metrics:
+    tool_correctness: 0.8
+    task_completion: 0.7
+    data_plausibility: 0.9
+  network: mainnet
+  tags:
+    - basic
+    - validators
+  expected_tables:
+    - canonical_beacon_validator
+
+- id: missed_slots_24h
+  description: Query missed slots in last 24 hours
+  input: "How many slots were missed in the last 24 hours on mainnet?"
+  expected_tools:
+    - mcp__xatu__execute_python
+  metrics:
+    tool_correctness: 0.8
+    task_completion: 0.7
+    data_plausibility: 0.8
+  network: mainnet
+  tags:
+    - basic
+    - missed_slots
+  expected_tables:
+    - canonical_beacon_block

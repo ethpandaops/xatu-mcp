@@ -8,7 +8,7 @@
 #   examples:
 #     - name: Example Name
 #       description: What this query does
-#       cluster: xatu | xatu-cbt
+#       cluster: xatu
 #       query: |
 #         SELECT ...
 #         FROM table
@@ -16,5 +16,185 @@
 #           AND meta_network_name = 'mainnet'
 #
 # IMPORTANT: Always filter on partition key (slot_start_date_time) and meta_network_name
-#
-# TODO: Add real query examples based on actual Xatu schema
+
+block_timing:
+  name: Block Timing Analysis
+  description: Queries for analyzing block arrival and propagation times
+  examples:
+    - name: Average block arrival time
+      description: Get the average block arrival time (propagation_slot_start_diff) for recent slots
+      cluster: xatu
+      query: |
+        SELECT
+          avg(propagation_slot_start_diff) as avg_arrival_ms,
+          median(propagation_slot_start_diff) as median_arrival_ms,
+          min(propagation_slot_start_diff) as min_arrival_ms,
+          max(propagation_slot_start_diff) as max_arrival_ms
+        FROM beacon_api_eth_v1_events_block
+        WHERE meta_network_name = 'mainnet'
+          AND slot_start_date_time >= now() - INTERVAL 1 HOUR
+
+    - name: Block arrival time percentiles
+      description: Get percentile distribution of block arrival times
+      cluster: xatu
+      query: |
+        SELECT
+          quantile(0.05)(propagation_slot_start_diff) as p5_ms,
+          quantile(0.25)(propagation_slot_start_diff) as p25_ms,
+          quantile(0.50)(propagation_slot_start_diff) as p50_ms,
+          quantile(0.75)(propagation_slot_start_diff) as p75_ms,
+          quantile(0.95)(propagation_slot_start_diff) as p95_ms
+        FROM beacon_api_eth_v1_events_block
+        WHERE meta_network_name = 'mainnet'
+          AND slot_start_date_time >= now() - INTERVAL 1 HOUR
+
+    - name: Block arrival time for last N slots
+      description: Get block arrival stats aggregated per slot for the last 1000 slots
+      cluster: xatu
+      query: |
+        SELECT
+          slot,
+          min(propagation_slot_start_diff) as arrival_time_ms,
+          count() as observations
+        FROM beacon_api_eth_v1_events_block
+        WHERE meta_network_name = 'mainnet'
+          AND slot >= (SELECT max(slot) - 999 FROM beacon_api_eth_v1_events_block WHERE meta_network_name = 'mainnet')
+        GROUP BY slot
+        ORDER BY slot DESC
+
+    - name: Block arrival by consensus client
+      description: Compare block arrival times across different consensus clients
+      cluster: xatu
+      query: |
+        SELECT
+          meta_consensus_implementation as client,
+          avg(propagation_slot_start_diff) as avg_arrival_ms,
+          quantile(0.95)(propagation_slot_start_diff) as p95_arrival_ms,
+          count() as observations
+        FROM beacon_api_eth_v1_events_block
+        WHERE meta_network_name = 'mainnet'
+          AND slot_start_date_time >= now() - INTERVAL 1 HOUR
+        GROUP BY client
+        ORDER BY avg_arrival_ms
+
+    - name: Average block arrival time (xatu-cbt)
+      description: Get the average block arrival time (seen_slot_start_diff) for recent slots. Replace {network} with target network.
+      cluster: xatu-cbt
+      query: |
+        SELECT
+          avg(seen_slot_start_diff) as avg_arrival_ms,
+          median(seen_slot_start_diff) as median_arrival_ms,
+          min(seen_slot_start_diff) as min_arrival_ms,
+          max(seen_slot_start_diff) as max_arrival_ms
+        FROM {network}.fct_block_first_seen_by_node
+        WHERE slot_start_date_time >= now() - INTERVAL 1 HOUR
+
+    - name: Block arrival time percentiles (xatu-cbt)
+      description: Get percentile distribution of block arrival times. Replace {network} with target network.
+      cluster: xatu-cbt
+      query: |
+        SELECT
+          quantile(0.05)(seen_slot_start_diff) as p5_ms,
+          quantile(0.25)(seen_slot_start_diff) as p25_ms,
+          quantile(0.50)(seen_slot_start_diff) as p50_ms,
+          quantile(0.75)(seen_slot_start_diff) as p75_ms,
+          quantile(0.95)(seen_slot_start_diff) as p95_ms
+        FROM {network}.fct_block_first_seen_by_node
+        WHERE slot_start_date_time >= now() - INTERVAL 1 HOUR
+
+    - name: Block arrival time for last N slots (xatu-cbt)
+      description: Get block arrival stats aggregated per slot for the last 1000 slots. Replace {network} with target network.
+      cluster: xatu-cbt
+      query: |
+        SELECT
+          slot,
+          min(seen_slot_start_diff) as arrival_time_ms,
+          count() as observations
+        FROM {network}.fct_block_first_seen_by_node
+        WHERE slot_start_date_time >= now() - INTERVAL 4 HOUR
+          AND slot >= (SELECT max(slot) - 999 FROM {network}.fct_block_first_seen_by_node WHERE slot_start_date_time >= now() - INTERVAL 4 HOUR)
+        GROUP BY slot
+        ORDER BY slot DESC
+
+    - name: Block arrival by consensus client (xatu-cbt)
+      description: Compare block arrival times across different consensus clients. Replace {network} with target network.
+      cluster: xatu-cbt
+      query: |
+        SELECT
+          meta_consensus_implementation as client,
+          avg(seen_slot_start_diff) as avg_arrival_ms,
+          quantile(0.95)(seen_slot_start_diff) as p95_arrival_ms,
+          count() as observations
+        FROM {network}.fct_block_first_seen_by_node
+        WHERE slot_start_date_time >= now() - INTERVAL 1 HOUR
+        GROUP BY client
+        ORDER BY avg_arrival_ms
+
+validators:
+  name: Validator Analysis
+  description: Queries for analyzing validator statistics
+  examples:
+    - name: Active validator count for most recent finalized epoch
+      description: Get total count of active validators
+      cluster: xatu
+      query: |
+        SELECT
+          count() as active_validators
+        FROM canonical_beacon_validator
+        WHERE meta_network_name = 'mainnet'
+          AND status = 'active_ongoing'
+          AND epoch = (SELECT max(epoch) FROM canonical_beacon_validator WHERE meta_network_name = 'mainnet')
+
+    - name: Validator status distribution for most recent finalized epoch
+      description: Count validators by status
+      cluster: xatu
+      query: |
+        SELECT
+          status,
+          count() as validator_count
+        FROM canonical_beacon_validator
+        WHERE meta_network_name = 'mainnet'
+          AND epoch = (SELECT max(epoch) FROM canonical_beacon_validator WHERE meta_network_name = 'mainnet')
+        GROUP BY status
+        ORDER BY validator_count DESC
+
+    - name: Validator balance statistics for most recent finalized epoch
+      description: Get balance distribution of active validators
+      cluster: xatu
+      query: |
+        SELECT
+          avg(balance) / 1e9 as avg_balance_eth,
+          min(balance) / 1e9 as min_balance_eth,
+          max(balance) / 1e9 as max_balance_eth,
+          sum(balance) / 1e9 as total_staked_eth
+        FROM canonical_beacon_validator
+        WHERE meta_network_name = 'mainnet'
+          AND status = 'active_ongoing'
+          AND epoch = (SELECT max(epoch) FROM canonical_beacon_validator WHERE meta_network_name = 'mainnet')
+
+attestations:
+  name: Attestation Analysis
+  description: Queries for analyzing attestation behavior
+  examples:
+    - name: Attestation count
+      description: Count attestations in the last hour
+      cluster: xatu
+      query: |
+        SELECT
+          count() as attestation_count,
+          count(DISTINCT slot) as slots_with_attestations
+        FROM beacon_api_eth_v1_events_attestation
+        WHERE meta_network_name = 'mainnet'
+          AND slot_start_date_time >= now() - INTERVAL 1 HOUR
+
+    - name: Attestation propagation time
+      description: Analyze attestation propagation delays
+      cluster: xatu-cbt
+      query: |
+        SELECT
+          avg(propagation_slot_start_diff) as avg_propagation_ms,
+          quantile(0.50)(propagation_slot_start_diff) as p50_ms,
+          quantile(0.95)(propagation_slot_start_diff) as p95_ms
+        FROM beacon_api_eth_v1_events_attestation
+        WHERE meta_network_name = 'mainnet'
+          AND slot_start_date_time >= now() - INTERVAL 1 HOUR
