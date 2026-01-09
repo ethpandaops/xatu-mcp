@@ -1,0 +1,20 @@
+# Query Examples for Xatu ClickHouse Data
+#
+# Format:
+#
+# category_key:
+#   name: Category Name
+#   description: Description of this category
+#   examples:
+#     - name: Example Name
+#       description: What this query does
+#       cluster: xatu | xatu-cbt
+#       query: |
+#         SELECT ...
+#         FROM table
+#         WHERE slot_start_date_time >= now() - INTERVAL 1 HOUR
+#           AND meta_network_name = 'mainnet'
+#
+# IMPORTANT: Always filter on partition key (slot_start_date_time) and meta_network_name
+#
+# TODO: Add real query examples based on actual Xatu schema
