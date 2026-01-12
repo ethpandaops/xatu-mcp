@@ -128,7 +128,7 @@ ANTHROPIC_API_KEY=sk-ant-...       # For Claude models
 OPENAI_API_KEY=sk-...              # For DeepEval metrics
 
 # xatu-mcp connection
-XATU_EVAL_XATU_MCP_URL=http://localhost:8080  # Default
+XATU_EVAL_XATU_MCP_URL=http://localhost:2480  # Default
 
 # Model selection
 XATU_EVAL_MODEL=claude-sonnet-4-5  # Default

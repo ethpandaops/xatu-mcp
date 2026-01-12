@@ -27,9 +27,9 @@ make fmt                      # Format code
 
 # Run
 make run                      # Run with stdio transport
-make run-sse                  # Run with SSE transport on port 8080
+make run-sse                  # Run with SSE transport on port 2480
 ./xatu-mcp serve              # Start server (default: stdio)
-./xatu-mcp serve -t sse -p 8080  # Start with SSE transport
+./xatu-mcp serve -t sse -p 2480  # Start with SSE transport
 
 # Evaluation tests (in tests/eval/)
 cd tests/eval && uv sync      # Install Python dependencies
@@ -169,8 +169,8 @@ docker-compose down               # Stop all services
 ```
 
 **Services:**
-- `mcp-server` - The xatu-mcp server (ports 8080 for MCP, 9090 for metrics)
-- `minio` - S3-compatible storage for chart/file uploads (port 9000 API, 9001 console)
+- `mcp-server` - The xatu-mcp server (ports 2480 for MCP, 2490 for metrics)
+- `minio` - S3-compatible storage for chart/file uploads (port 2400 API, 2401 console)
 - `minio-init` - Creates the output bucket on startup
 - `sandbox-builder` - Builds the sandbox Docker image
 

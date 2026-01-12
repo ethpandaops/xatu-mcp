@@ -34,8 +34,8 @@ Examples:
   # Start with stdio transport (for Claude Desktop)
   xatu-mcp serve
 
-  # Start with SSE transport on port 8080
-  xatu-mcp serve --transport sse --port 8080
+  # Start with SSE transport on port 2480
+  xatu-mcp serve --transport sse --port 2480
 
   # Start with custom config
   xatu-mcp serve -c /path/to/config.yaml`,

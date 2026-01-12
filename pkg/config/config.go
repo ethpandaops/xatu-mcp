@@ -241,7 +241,7 @@ func applyDefaults(cfg *Config) {
 		cfg.Server.Host = "0.0.0.0"
 	}
 	if cfg.Server.Port == 0 {
-		cfg.Server.Port = 8080
+		cfg.Server.Port = 2480
 	}
 	if cfg.Server.Transport == "" {
 		cfg.Server.Transport = "stdio"
@@ -279,7 +279,7 @@ func applyDefaults(cfg *Config) {
 	}
 
 	if cfg.Observability.MetricsPort == 0 {
-		cfg.Observability.MetricsPort = 9090
+		cfg.Observability.MetricsPort = 2490
 	}
 
 	// Schema discovery defaults.

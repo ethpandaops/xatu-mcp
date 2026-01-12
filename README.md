@@ -17,7 +17,7 @@ cp config.example.yaml config.yaml
 docker-compose up -d
 ```
 
-The server runs on port 8080 (SSE transport) with MinIO on ports 9000/9001.
+The server runs on port 2480 (SSE transport, configurable via `MCP_SERVER_PORT`) with MinIO on ports 2400/2401 (configurable via `MINIO_API_PORT`/`MINIO_CONSOLE_PORT`).
 
 ## Claude Desktop
 
@@ -27,7 +27,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "xatu": {
-      "url": "http://localhost:8080/sse"
+      "url": "http://localhost:2480/sse"
     }
   }
 }

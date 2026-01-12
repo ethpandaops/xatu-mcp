@@ -258,7 +258,7 @@ def main() -> None:
 Examples:
   uv run python -m scripts.repl
   uv run python -m scripts.repl --model claude-haiku-4-5
-  uv run python -m scripts.repl --verbose --url http://localhost:9090
+  uv run python -m scripts.repl --verbose --url http://localhost:2480
   uv run xatu-repl --verbose
         """,
     )
@@ -276,8 +276,8 @@ Examples:
     )
     parser.add_argument(
         "--url",
-        default="http://localhost:8080",
-        help="xatu-mcp server URL (default: http://localhost:8080)",
+        default="http://localhost:2480",
+        help="xatu-mcp server URL (default: http://localhost:2480)",
     )
     args = parser.parse_args()
 

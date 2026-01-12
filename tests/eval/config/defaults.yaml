@@ -4,7 +4,7 @@
 model: claude-sonnet-4-5
 
 # xatu-mcp connection
-xatu_mcp_url: http://localhost:8080
+xatu_mcp_url: http://localhost:2480
 
 # Evaluation settings
 max_turns: 15

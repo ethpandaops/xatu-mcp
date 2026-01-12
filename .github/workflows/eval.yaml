@@ -75,7 +75,7 @@ jobs:
           cat > config.ci.yaml << 'EOF'
           server:
             host: "0.0.0.0"
-            port: 8080
+            port: 2480
 
           auth:
             enabled: false
@@ -102,7 +102,7 @@ jobs:
           ./xatu-mcp serve --config config.ci.yaml &
           # Wait for server to be ready
           for i in {1..30}; do
-            if curl -s http://localhost:8080/health > /dev/null 2>&1; then
+            if curl -s http://localhost:2480/health > /dev/null 2>&1; then
               echo "Server is ready"
               break
             fi
@@ -114,7 +114,7 @@ jobs:
         working-directory: tests/eval
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          XATU_EVAL_XATU_MCP_URL: http://localhost:8080
+          XATU_EVAL_XATU_MCP_URL: http://localhost:2480
           XATU_EVAL_MODEL: ${{ inputs.model || 'claude-sonnet-4-5' }}
           XATU_EVAL_VERBOSE: ${{ inputs.verbose || 'false' }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}  # For DeepEval metrics
