@@ -4,7 +4,7 @@
 #   docker build -t xatu-mcp:latest .
 #
 # Run:
-#   docker run -p 8080:8080 -v /var/run/docker.sock:/var/run/docker.sock xatu-mcp:latest
+#   docker run -p 2480:2480 -v /var/run/docker.sock:/var/run/docker.sock xatu-mcp:latest
 
 # Build stage
 FROM golang:1.24-alpine AS builder
@@ -53,11 +53,11 @@ RUN mkdir -p /config /shared /output && \
     chown -R xatu:xatu /app /config /shared /output
 
 # Expose ports
-EXPOSE 8080 9090
+EXPOSE 2480 2490
 
 # Health check - verify the MCP server port is accepting connections
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD nc -z localhost 8080 || exit 1
+    CMD nc -z localhost 2480 || exit 1
 
 # Default command - start with SSE transport
 ENTRYPOINT ["xatu-mcp"]

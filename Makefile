@@ -81,7 +81,7 @@ run: build ## Run the server with stdio transport
 	./xatu-mcp serve
 
 run-sse: build ## Run the server with SSE transport
-	./xatu-mcp serve --transport sse --port 8080
+	./xatu-mcp serve --transport sse --port 2480
 
 run-docker: docker ## Run with docker-compose
 	docker-compose up -d

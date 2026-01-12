@@ -29,7 +29,7 @@ class EvalSettings(BaseSettings):
 
     # xatu-mcp connection (external server, auth disabled)
     xatu_mcp_url: str = Field(
-        default="http://localhost:8080",
+        default="http://localhost:2480",
         description="URL of the xatu-mcp server",
     )
 
