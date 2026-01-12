@@ -9,18 +9,15 @@ Read more: https://www.anthropic.com/engineering/code-execution-with-mcp
 ## Quick Start
 
 ```bash
-# Build
-make build
-make docker-sandbox  # Required for Python execution
-
 # Configure
 cp config.example.yaml config.yaml
 # Edit config.yaml with your Grafana URL and service token
 
-# Run
-./xatu-mcp serve                    # stdio transport (local)
-./xatu-mcp serve -t sse -p 8080     # SSE transport (web)
+# Run (builds sandbox image, starts MinIO + MCP server)
+docker-compose up -d
 ```
+
+The server runs on port 8080 (SSE transport) with MinIO on ports 9000/9001.
 
 ## Claude Desktop
 
@@ -30,13 +27,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "xatu": {
-      "command": "/path/to/xatu-mcp",
-      "args": ["serve"],
-      "env": {
-        "CONFIG_PATH": "/path/to/config.yaml",
-        "GRAFANA_URL": "https://grafana.example.com",
-        "GRAFANA_SERVICE_TOKEN": "your-service-token"
-      }
+      "url": "http://localhost:8080/sse"
     }
   }
 }
@@ -59,9 +50,6 @@ make test            # Run tests
 make lint            # Run linters
 make docker          # Build Docker image
 make docker-sandbox  # Build sandbox image
-
-# Local stack with MinIO
-docker-compose up -d
 ```
 
 ## License
