@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 xatu-mcp is an MCP (Model Context Protocol) server that provides AI assistants with Ethereum network analytics capabilities. It enables agents to execute Python code in sandboxed containers with access to ClickHouse blockchain data, Prometheus metrics, Loki logs, and S3-compatible storage for outputs.
 
-All data queries are proxied through Grafana using datasource UIDs, simplifying credential management to a single service token.
+Data queries connect directly to configured datasources (ClickHouse, Prometheus, Loki) without intermediate proxies.
 
 ## Commands
 
@@ -49,13 +49,13 @@ pkg/
 │   └── execute_python.go  # Main tool for Python sandbox execution
 ├── resource/        # MCP resources (datasources, networks, schemas)
 │   ├── registry.go  # Static and template resource handlers
+│   ├── clickhouse_schema.go  # Direct ClickHouse schema discovery
 │   └── *.go         # Individual resource providers
 ├── sandbox/         # Sandboxed code execution
 │   ├── sandbox.go   # Service interface (Docker/gVisor backends)
 │   ├── docker.go    # Docker container execution
 │   ├── gvisor.go    # gVisor-based execution (production)
 │   └── session.go   # Session management for persistent containers
-├── grafana/         # Grafana proxy client for datasource queries
 ├── auth/            # GitHub OAuth authentication
 ├── config/          # Configuration loading and validation
 └── observability/   # Prometheus metrics
@@ -77,28 +77,29 @@ tests/eval/          # LLM evaluation harness
 ### Builder Pattern
 `pkg/server/builder.go` wires all dependencies. Services are created and started in order:
 1. Sandbox service
-2. Grafana client
-3. Cartographoor client (network discovery)
-4. ClickHouse schema client (optional)
-5. Auth service
-6. Tool and resource registries
-7. MCP server
+2. Cartographoor client (network discovery)
+3. ClickHouse schema client (optional, direct connections)
+4. Auth service
+5. Tool and resource registries
+6. MCP server
 
 ### Registry Pattern
 Tools and resources use registries (`tool.Registry`, `resource.Registry`) that allow registration of handlers and definitions. The server iterates over registries to register with the MCP server.
 
 ### Sandbox Execution Flow
 1. `execute_python` tool receives code
-2. Builds environment variables from config (Grafana URL/token, S3 credentials)
+2. Builds environment variables from config (datasource configs as JSON, S3 credentials)
 3. Calls `sandbox.Service.Execute()` which creates/reuses a Docker container
 4. Container runs Python with the `xatu` library pre-installed
-5. Output, files, and session info returned to caller
+5. Python code connects directly to ClickHouse/Prometheus/Loki using credentials from env
+6. Output, files, and session info returned to caller
 
 ## Configuration
 
-All datasource queries route through Grafana. Configuration requires:
-- `grafana.url` and `grafana.service_token` - Grafana endpoint and auth
-- `grafana.datasources` - List of datasource UIDs with descriptions
+Datasources connect directly (no Grafana proxy). Configuration requires:
+- `clickhouse` - List of ClickHouse clusters with connection details
+- `prometheus` - List of Prometheus instances (optional)
+- `loki` - List of Loki instances (optional)
 - `sandbox.backend` - `docker` (local) or `gvisor` (production)
 - `storage` - S3-compatible storage for output files
 
@@ -120,8 +121,10 @@ uv run python -m scripts.run_eval --category basic_queries
 ## MCP Resources
 
 Key resources exposed by the server:
-- `datasources://list` - All configured Grafana datasources
-- `datasources://clickhouse` - ClickHouse datasources only
+- `datasources://list` - All configured datasources (ClickHouse, Prometheus, Loki)
+- `datasources://clickhouse` - ClickHouse clusters only
+- `datasources://prometheus` - Prometheus instances only
+- `datasources://loki` - Loki instances only
 - `networks://active` - Active Ethereum networks
 - `networks://{name}` - Specific network details
 - `clickhouse://tables` - List all tables (if schema discovery enabled)
@@ -141,7 +144,7 @@ Key resources exposed by the server:
 2. **Set up configuration**:
    ```bash
    cp config.example.yaml config.yaml
-   # Edit config.yaml with your Grafana URL and service token
+   # Edit config.yaml with your datasource credentials
    ```
 
 3. **Run the server locally**:

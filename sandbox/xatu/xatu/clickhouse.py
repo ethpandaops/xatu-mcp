@@ -1,23 +1,30 @@
-"""ClickHouse data access via Grafana proxy.
+"""ClickHouse data access via direct connections.
 
-This module provides functions to query ClickHouse datasources
-through Grafana's unified query API.
+This module provides functions to query ClickHouse clusters directly
+using the clickhouse-connect library.
 
 Example:
     from xatu import clickhouse
 
-    # List available ClickHouse datasources
-    datasources = clickhouse.list_datasources()
+    # List available ClickHouse clusters
+    clusters = clickhouse.list_datasources()
 
-    # Query using datasource UID
-    df = clickhouse.query("datasource-uid", "SELECT * FROM beacon_api_eth_v1_events_block LIMIT 10")
+    # Query using cluster name
+    df = clickhouse.query("xatu", "SELECT * FROM beacon_api_eth_v1_events_block LIMIT 10")
 """
 
+import json
+import logging
 import os
+import re
+from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
-import httpx
+import clickhouse_connect
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 class ClickHouseError(Exception):
@@ -34,273 +41,238 @@ class ClickHouseError(Exception):
             parts.append(f"Suggestion: {self.suggestion}")
         return "\n".join(parts)
 
-# Grafana configuration from environment variables
-_GRAFANA_URL = os.environ.get("XATU_GRAFANA_URL", "")
-_GRAFANA_TOKEN = os.environ.get("XATU_GRAFANA_TOKEN", "")
-_HTTP_TIMEOUT = int(os.environ.get("XATU_HTTP_TIMEOUT", "120"))
 
-# Cache for datasources
-_DATASOURCES: dict[str, dict] | None = None
+@dataclass
+class _ClusterConfig:
+    """Internal representation of a ClickHouse cluster configuration."""
+
+    name: str
+    host: str
+    port: int
+    database: str
+    username: str
+    password: str
+    secure: bool
+    skip_verify: bool
+    timeout: int
+    description: str
 
 
-def _get_client() -> httpx.Client:
-    """Create an HTTP client for Grafana API calls.
+# Cache for cluster configurations.
+_CLUSTERS: dict[str, _ClusterConfig] | None = None
 
-    Returns:
-        Configured httpx client.
 
-    Raises:
-        ValueError: If Grafana is not configured.
-    """
-    if not _GRAFANA_URL or not _GRAFANA_TOKEN:
+def _load_clusters() -> None:
+    """Load cluster configurations from environment variable."""
+    global _CLUSTERS
+
+    if _CLUSTERS is not None:
+        return
+
+    raw = os.environ.get("XATU_CLICKHOUSE_CONFIGS", "")
+    if not raw:
         raise ValueError(
-            "Grafana not configured. "
-            "Set XATU_GRAFANA_URL and XATU_GRAFANA_TOKEN environment variables."
+            "ClickHouse not configured. Set XATU_CLICKHOUSE_CONFIGS environment variable."
         )
 
-    return httpx.Client(
-        base_url=_GRAFANA_URL,
-        headers={
-            "Authorization": f"Bearer {_GRAFANA_TOKEN}",
-            "Content-Type": "application/json",
-        },
-        timeout=_HTTP_TIMEOUT,
+    try:
+        configs = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid XATU_CLICKHOUSE_CONFIGS JSON: {e}") from e
+
+    _CLUSTERS = {}
+    for cfg in configs:
+        # Parse host:port with IPv6 support using URL parsing
+        raw_host = cfg.get("host", "")
+        port = 9440  # Default secure port
+
+        # Try to parse as a URL to handle IPv6 addresses like [::1]:9440
+        if raw_host.startswith("[") or "://" in raw_host:
+            # Handle bracketed IPv6 or full URL
+            parsed = urlparse(f"tcp://{raw_host}" if "://" not in raw_host else raw_host)
+            host = parsed.hostname or raw_host
+            if parsed.port:
+                port = parsed.port
+        elif re.match(r"^[^:]+:\d+$", raw_host):
+            # Simple host:port format (IPv4 or hostname)
+            host, port_str = raw_host.rsplit(":", 1)
+            try:
+                port = int(port_str)
+            except ValueError:
+                host = raw_host
+        else:
+            host = raw_host
+
+        # Get secure setting (default True)
+        secure = cfg.get("secure")
+        if secure is None:
+            secure = True
+
+        skip_verify = cfg.get("skip_verify", False)
+        if skip_verify:
+            logger.warning(
+                "TLS certificate verification disabled (skip_verify=true) for %s - vulnerable to MITM attacks",
+                cfg["name"],
+            )
+
+        cluster = _ClusterConfig(
+            name=cfg["name"],
+            host=host,
+            port=port,
+            database=cfg.get("database", "default"),
+            username=cfg.get("username", ""),
+            password=cfg.get("password", ""),
+            secure=secure,
+            skip_verify=skip_verify,
+            timeout=cfg.get("timeout", 120),
+            description=cfg.get("description", ""),
+        )
+        _CLUSTERS[cluster.name] = cluster
+
+
+def _get_client(cluster_name: str) -> clickhouse_connect.driver.Client:
+    """Get or create a ClickHouse client for a cluster.
+
+    Args:
+        cluster_name: The logical name of the ClickHouse cluster.
+
+    Returns:
+        A clickhouse-connect client.
+
+    Raises:
+        ValueError: If the cluster is not found.
+    """
+    _load_clusters()
+
+    if _CLUSTERS is None or cluster_name not in _CLUSTERS:
+        available = list(_CLUSTERS.keys()) if _CLUSTERS else []
+        raise ValueError(
+            f"Unknown cluster '{cluster_name}'. Available clusters: {available}"
+        )
+
+    cluster = _CLUSTERS[cluster_name]
+
+    # Configure TLS verification
+    verify = not cluster.skip_verify
+
+    return clickhouse_connect.get_client(
+        host=cluster.host,
+        port=cluster.port,
+        username=cluster.username,
+        password=cluster.password,
+        database=cluster.database,
+        secure=cluster.secure,
+        verify=verify,
+        query_limit=0,  # No limit
+        connect_timeout=30,
+        send_receive_timeout=cluster.timeout,
     )
 
 
-def list_datasources() -> list[dict]:
-    """List available ClickHouse datasources from Grafana.
+def list_datasources() -> list[dict[str, Any]]:
+    """List available ClickHouse clusters.
 
     Returns:
-        List of datasource info dictionaries with uid, name, and type.
+        List of cluster info dictionaries with name, description, and database.
 
     Example:
-        >>> datasources = list_datasources()
-        >>> for ds in datasources:
-        ...     print(f"{ds['name']}: {ds['uid']}")
+        >>> clusters = list_datasources()
+        >>> for c in clusters:
+        ...     print(f"{c['name']}: {c['description']}")
     """
-    global _DATASOURCES
+    _load_clusters()
 
-    with _get_client() as client:
-        resp = client.get("/api/datasources")
-        resp.raise_for_status()
+    if _CLUSTERS is None:
+        return []
 
-        datasources = []
-        _DATASOURCES = {}
-
-        for ds in resp.json():
-            ds_type = ds.get("type", "").lower()
-            if "clickhouse" in ds_type:
-                info = {
-                    "uid": ds["uid"],
-                    "name": ds["name"],
-                    "type": ds["type"],
-                }
-                datasources.append(info)
-                _DATASOURCES[ds["uid"]] = info
-
-        return datasources
-
-
-def _get_datasource(datasource_uid: str) -> dict:
-    """Get datasource info, discovering if necessary.
-
-    Args:
-        datasource_uid: The Grafana datasource UID.
-
-    Returns:
-        Datasource info dictionary.
-
-    Raises:
-        ValueError: If datasource is not found.
-    """
-    global _DATASOURCES
-
-    if _DATASOURCES is None:
-        list_datasources()
-
-    if _DATASOURCES and datasource_uid in _DATASOURCES:
-        return _DATASOURCES[datasource_uid]
-
-    # Datasource not found, try to fetch it directly
-    with _get_client() as client:
-        resp = client.get(f"/api/datasources/uid/{datasource_uid}")
-        if resp.status_code == 404:
-            available = list(_DATASOURCES.keys()) if _DATASOURCES else []
-            raise ValueError(
-                f"Datasource '{datasource_uid}' not found. "
-                f"Available ClickHouse datasources: {available}"
-            )
-        resp.raise_for_status()
-
-        ds = resp.json()
-        info = {
-            "uid": ds["uid"],
-            "name": ds["name"],
-            "type": ds["type"],
+    return [
+        {
+            "name": c.name,
+            "description": c.description,
+            "database": c.database,
         }
-
-        if _DATASOURCES is not None:
-            _DATASOURCES[ds["uid"]] = info
-
-        return info
+        for c in _CLUSTERS.values()
+    ]
 
 
 def query(
-    datasource_uid: str,
+    cluster_name: str,
     sql: str,
     parameters: dict[str, Any] | None = None,
 ) -> pd.DataFrame:
-    """Execute a SQL query via Grafana and return results as a DataFrame.
+    """Execute a SQL query against a ClickHouse cluster.
 
     Args:
-        datasource_uid: The Grafana datasource UID for the ClickHouse instance.
+        cluster_name: The logical name of the ClickHouse cluster.
         sql: SQL query to execute.
-        parameters: Optional query parameters (currently not supported via Grafana).
+        parameters: Optional query parameters for parameterized queries.
 
     Returns:
         DataFrame with query results.
 
     Raises:
-        ValueError: If datasource is not found or query fails.
+        ValueError: If cluster is not found.
+        ClickHouseError: If query execution fails.
 
     Example:
-        >>> df = query("my-clickhouse-uid", "SELECT * FROM blocks LIMIT 10")
+        >>> df = query("xatu", "SELECT * FROM blocks LIMIT 10")
+        >>> df = query("xatu", "SELECT * FROM blocks WHERE slot > {slot:UInt64}", {"slot": 1000})
     """
-    if parameters:
-        raise NotImplementedError(
-            "Parameterized queries are not yet supported via Grafana proxy. "
-            "Please inline your parameters in the SQL query."
-        )
+    client = _get_client(cluster_name)
 
-    ds = _get_datasource(datasource_uid)
+    try:
+        if parameters:
+            result = client.query(sql, parameters=parameters)
+        else:
+            result = client.query(sql)
 
-    # Build Grafana unified query request
-    import time
+        return result.result_set_df()
+    except Exception as e:
+        error_msg = str(e)
 
-    now_ms = int(time.time() * 1000)
-    from_ms = now_ms - (60 * 60 * 1000)  # 1 hour ago
+        # Provide helpful suggestions for common errors
+        suggestion = None
+        if "TIMEOUT" in error_msg.upper() or "timeout" in error_msg.lower():
+            suggestion = (
+                "Query timed out. Ensure you're filtering by the table's partition column "
+                "(usually slot_start_date_time) to avoid full table scans. "
+                "Use clickhouse://tables/{table} resource to find the partition key."
+            )
+        elif "MEMORY_LIMIT" in error_msg.upper():
+            suggestion = (
+                "Query exceeded memory limit. Add more restrictive filters or use LIMIT clause. "
+                "Consider filtering by partition key first."
+            )
+        elif "Unknown identifier" in error_msg or "no column" in error_msg.lower():
+            suggestion = (
+                "Check column names against clickhouse://tables/{table} resource. "
+                "Column names are case-sensitive."
+            )
 
-    body = {
-        "from": str(from_ms),
-        "to": str(now_ms),
-        "queries": [
-            {
-                "refId": "A",
-                "datasource": {"uid": datasource_uid, "type": ds["type"]},
-                "queryType": "sql",
-                "editorType": "sql",
-                "format": 1,  # Table format
-                "intervalMs": 1000,
-                "maxDataPoints": 10000,
-                "rawSql": sql,
-            },
-        ],
-    }
-
-    with _get_client() as client:
-        try:
-            resp = client.post("/api/ds/query", json=body)
-            resp.raise_for_status()
-        except httpx.HTTPStatusError as e:
-            _raise_query_error(e, datasource_uid)
-
-        return _parse_grafana_response(resp.json())
-
-
-def _raise_query_error(error: httpx.HTTPStatusError, datasource_uid: str) -> None:
-    """Convert HTTP errors to actionable ClickHouseError exceptions."""
-    status = error.response.status_code
-    schema_hint = (
-        "Use clickhouse://tables/{table} resource to find the "
-        "partition key for your table."
-    )
-
-    if status == 504:
-        raise ClickHouseError(
-            "Query timed out (504 Gateway Timeout)",
-            f"Ensure you're filtering by the table's partition column to avoid "
-            f"full table scans. {schema_hint}",
-        ) from error
-    elif status == 502:
-        raise ClickHouseError(
-            "Database temporarily unavailable (502 Bad Gateway)",
-            f"This is usually temporary. Wait 10 seconds and retry. "
-            f"If persistent, check that your query filters on the partition column. {schema_hint}",
-        ) from error
-    elif status == 400:
-        # Try to extract actual error from response
-        try:
-            detail = error.response.text
-        except Exception:
-            detail = "Bad request"
-        raise ClickHouseError(
-            f"Query error (400): {detail}",
-            "Check column names and types against clickhouse://tables/{table} resource.",
-        ) from error
-    else:
-        raise ClickHouseError(
-            f"HTTP error {status}: {error.response.text}",
-        ) from error
-
-
-def _parse_grafana_response(data: dict) -> pd.DataFrame:
-    """Parse a Grafana unified query response into a DataFrame.
-
-    Args:
-        data: Grafana API response.
-
-    Returns:
-        DataFrame with query results.
-
-    Raises:
-        ValueError: If the response contains an error.
-    """
-    results = data.get("results", {})
-
-    for ref_id, result in results.items():
-        # Check for errors
-        if error := result.get("error"):
-            raise ValueError(f"Query failed: {error}")
-
-        frames = result.get("frames", [])
-        if not frames:
-            return pd.DataFrame()
-
-        # Parse the first frame
-        frame = frames[0]
-        schema = frame.get("schema", {})
-        fields = schema.get("fields", [])
-        values = frame.get("data", {}).get("values", [])
-
-        if not fields or not values:
-            return pd.DataFrame()
-
-        # Build DataFrame
-        columns = [f["name"] for f in fields]
-        data_dict = dict(zip(columns, values))
-
-        return pd.DataFrame(data_dict)
-
-    return pd.DataFrame()
+        raise ClickHouseError(error_msg, suggestion) from e
+    finally:
+        client.close()
 
 
 def query_raw(
-    datasource_uid: str,
+    cluster_name: str,
     sql: str,
     parameters: dict[str, Any] | None = None,
 ) -> tuple[list[tuple], list[str]]:
     """Execute a SQL query and return raw results.
 
     Args:
-        datasource_uid: The Grafana datasource UID.
+        cluster_name: The logical name of the ClickHouse cluster.
         sql: SQL query to execute.
-        parameters: Optional query parameters (currently not supported).
+        parameters: Optional query parameters.
 
     Returns:
         Tuple of (rows, column_names).
+
+    Example:
+        >>> rows, columns = query_raw("xatu", "SELECT slot, block_root FROM blocks LIMIT 5")
     """
-    df = query(datasource_uid, sql, parameters)
+    df = query(cluster_name, sql, parameters)
 
     if df.empty:
         return [], []

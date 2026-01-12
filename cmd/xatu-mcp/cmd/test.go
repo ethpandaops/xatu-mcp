@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"time"
@@ -68,7 +69,10 @@ func runTest(cmd *cobra.Command, args []string) error {
 	fmt.Println("=== Running... ===")
 
 	// Build environment
-	env := buildTestEnv(cfg)
+	env, err := buildTestEnv(cfg)
+	if err != nil {
+		return fmt.Errorf("building test environment: %w", err)
+	}
 
 	// Execute
 	result, err := sandboxSvc.Execute(ctx, sandbox.ExecuteRequest{
@@ -151,13 +155,38 @@ print("\nAll tests passed!")
 `
 }
 
-func buildTestEnv(cfg *config.Config) map[string]string {
+func buildTestEnv(cfg *config.Config) (map[string]string, error) {
 	env := make(map[string]string, 8)
 
-	// Grafana configuration - all datasource queries route through Grafana.
-	env["XATU_GRAFANA_URL"] = cfg.Grafana.URL
-	env["XATU_GRAFANA_TOKEN"] = cfg.Grafana.ServiceToken
-	env["XATU_HTTP_TIMEOUT"] = fmt.Sprintf("%d", cfg.Grafana.Timeout)
+	// ClickHouse configs as JSON array.
+	if len(cfg.ClickHouse) > 0 {
+		chConfigs, err := json.Marshal(cfg.ClickHouse)
+		if err != nil {
+			return nil, fmt.Errorf("marshaling ClickHouse configs: %w", err)
+		}
+
+		env["XATU_CLICKHOUSE_CONFIGS"] = string(chConfigs)
+	}
+
+	// Prometheus configs as JSON array.
+	if len(cfg.Prometheus) > 0 {
+		promConfigs, err := json.Marshal(cfg.Prometheus)
+		if err != nil {
+			return nil, fmt.Errorf("marshaling Prometheus configs: %w", err)
+		}
+
+		env["XATU_PROMETHEUS_CONFIGS"] = string(promConfigs)
+	}
+
+	// Loki configs as JSON array.
+	if len(cfg.Loki) > 0 {
+		lokiConfigs, err := json.Marshal(cfg.Loki)
+		if err != nil {
+			return nil, fmt.Errorf("marshaling Loki configs: %w", err)
+		}
+
+		env["XATU_LOKI_CONFIGS"] = string(lokiConfigs)
+	}
 
 	// S3 Storage.
 	if cfg.Storage != nil {
@@ -172,5 +201,5 @@ func buildTestEnv(cfg *config.Config) map[string]string {
 		}
 	}
 
-	return env
+	return env, nil
 }

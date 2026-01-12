@@ -1,20 +1,20 @@
-"""Prometheus metrics access via Grafana proxy.
+"""Prometheus metrics access via direct connections.
 
-This module provides functions to query Prometheus datasources
-through Grafana's datasource proxy.
+This module provides functions to query Prometheus instances directly
+using the HTTP API.
 
 Example:
     from xatu import prometheus
 
-    # List available Prometheus datasources
-    datasources = prometheus.list_datasources()
+    # List available Prometheus instances
+    instances = prometheus.list_datasources()
 
     # Instant query
-    result = prometheus.query("datasource-uid", "up")
+    result = prometheus.query("ethpandaops", "up")
 
     # Range query
     result = prometheus.query_range(
-        "datasource-uid",
+        "ethpandaops",
         "rate(http_requests_total[5m])",
         start="now-1h",
         end="now",
@@ -22,78 +22,146 @@ Example:
     )
 """
 
+import json
+import logging
 import os
 import time as time_module
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
-# Grafana configuration from environment variables
-_GRAFANA_URL = os.environ.get("XATU_GRAFANA_URL", "")
-_GRAFANA_TOKEN = os.environ.get("XATU_GRAFANA_TOKEN", "")
-_HTTP_TIMEOUT = int(os.environ.get("XATU_HTTP_TIMEOUT", "120"))
+from ._time import parse_duration
 
-# Cache for datasources
-_DATASOURCES: dict[str, dict] | None = None
+logger = logging.getLogger(__name__)
 
 
-def _get_client() -> httpx.Client:
-    """Create an HTTP client for Grafana API calls.
+@dataclass
+class _InstanceConfig:
+    """Internal representation of a Prometheus instance configuration."""
 
-    Returns:
-        Configured httpx client.
+    name: str
+    url: str
+    username: str
+    password: str
+    skip_verify: bool
+    timeout: int
+    description: str
 
-    Raises:
-        ValueError: If Grafana is not configured.
-    """
-    if not _GRAFANA_URL or not _GRAFANA_TOKEN:
+
+# Cache for instance configurations.
+_INSTANCES: dict[str, _InstanceConfig] | None = None
+
+
+def _load_instances() -> None:
+    """Load instance configurations from environment variable."""
+    global _INSTANCES
+
+    if _INSTANCES is not None:
+        return
+
+    raw = os.environ.get("XATU_PROMETHEUS_CONFIGS", "")
+    if not raw:
         raise ValueError(
-            "Grafana not configured. "
-            "Set XATU_GRAFANA_URL and XATU_GRAFANA_TOKEN environment variables."
+            "Prometheus not configured. Set XATU_PROMETHEUS_CONFIGS environment variable."
         )
 
+    try:
+        configs = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid XATU_PROMETHEUS_CONFIGS JSON: {e}") from e
+
+    _INSTANCES = {}
+    for cfg in configs:
+        skip_verify = cfg.get("skip_verify", False)
+        if skip_verify:
+            logger.warning(
+                "TLS certificate verification disabled (skip_verify=true) for %s - vulnerable to MITM attacks",
+                cfg["name"],
+            )
+
+        instance = _InstanceConfig(
+            name=cfg["name"],
+            url=cfg.get("url", "").rstrip("/"),
+            username=cfg.get("username", ""),
+            password=cfg.get("password", ""),
+            skip_verify=skip_verify,
+            timeout=cfg.get("timeout", 60),
+            description=cfg.get("description", ""),
+        )
+        _INSTANCES[instance.name] = instance
+
+
+def _get_client(instance_name: str) -> httpx.Client:
+    """Get an HTTP client for a Prometheus instance.
+
+    Args:
+        instance_name: The logical name of the Prometheus instance.
+
+    Returns:
+        An httpx client configured for the instance.
+
+    Raises:
+        ValueError: If the instance is not found.
+    """
+    _load_instances()
+
+    if _INSTANCES is None or instance_name not in _INSTANCES:
+        available = list(_INSTANCES.keys()) if _INSTANCES else []
+        raise ValueError(
+            f"Unknown instance '{instance_name}'. Available instances: {available}"
+        )
+
+    instance = _INSTANCES[instance_name]
+
+    # Configure authentication
+    auth = None
+    if instance.username:
+        auth = (instance.username, instance.password)
+
+    # Configure TLS verification
+    verify = not instance.skip_verify
+
+    # Configure granular timeout (connect, read, write, pool)
+    timeout = httpx.Timeout(
+        connect=5.0,
+        read=float(instance.timeout),
+        write=float(instance.timeout),
+        pool=5.0,
+    )
+
     return httpx.Client(
-        base_url=_GRAFANA_URL,
-        headers={
-            "Authorization": f"Bearer {_GRAFANA_TOKEN}",
-            "Content-Type": "application/json",
-        },
-        timeout=_HTTP_TIMEOUT,
+        base_url=instance.url,
+        auth=auth,
+        timeout=timeout,
+        verify=verify,
     )
 
 
-def list_datasources() -> list[dict]:
-    """List available Prometheus datasources from Grafana.
+def list_datasources() -> list[dict[str, Any]]:
+    """List available Prometheus instances.
 
     Returns:
-        List of datasource info dictionaries with uid, name, and type.
+        List of instance info dictionaries with name, description, and url.
 
     Example:
-        >>> datasources = list_datasources()
-        >>> for ds in datasources:
-        ...     print(f"{ds['name']}: {ds['uid']}")
+        >>> instances = list_datasources()
+        >>> for inst in instances:
+        ...     print(f"{inst['name']}: {inst['description']}")
     """
-    global _DATASOURCES
+    _load_instances()
 
-    with _get_client() as client:
-        resp = client.get("/api/datasources")
-        resp.raise_for_status()
+    if _INSTANCES is None:
+        return []
 
-        datasources = []
-        _DATASOURCES = {}
-
-        for ds in resp.json():
-            ds_type = ds.get("type", "").lower()
-            if "prometheus" in ds_type:
-                info = {
-                    "uid": ds["uid"],
-                    "name": ds["name"],
-                    "type": ds["type"],
-                }
-                datasources.append(info)
-                _DATASOURCES[ds["uid"]] = info
-
-        return datasources
+    return [
+        {
+            "name": inst.name,
+            "description": inst.description,
+            "url": inst.url,
+        }
+        for inst in _INSTANCES.values()
+    ]
 
 
 def _parse_time(time_str: str) -> int:
@@ -110,7 +178,7 @@ def _parse_time(time_str: str) -> int:
 
     if time_str.startswith("now-"):
         duration = time_str[4:]
-        seconds = _parse_duration(duration)
+        seconds = parse_duration(duration)
         return int(time_module.time()) - seconds
 
     # Try Unix timestamp
@@ -135,43 +203,15 @@ def _parse_time(time_str: str) -> int:
         raise ValueError(f"Cannot parse time '{time_str}': {e}") from e
 
 
-def _parse_duration(duration: str) -> int:
-    """Parse a duration string to seconds.
+def query(
+    instance_name: str,
+    promql: str,
+    time: str | None = None,
+) -> dict[str, Any]:
+    """Execute an instant PromQL query.
 
     Args:
-        duration: Duration string (e.g., "1h", "30m", "1d").
-
-    Returns:
-        Duration in seconds.
-    """
-    units = {
-        "s": 1,
-        "m": 60,
-        "h": 3600,
-        "d": 86400,
-        "w": 604800,
-    }
-
-    if not duration:
-        return 0
-
-    unit = duration[-1].lower()
-    if unit not in units:
-        raise ValueError(f"Unknown duration unit: {unit}")
-
-    try:
-        value = int(duration[:-1])
-    except ValueError as e:
-        raise ValueError(f"Invalid duration value: {duration}") from e
-
-    return value * units[unit]
-
-
-def query(datasource_uid: str, promql: str, time: str | None = None) -> dict[str, Any]:
-    """Execute an instant PromQL query via Grafana proxy.
-
-    Args:
-        datasource_uid: The Grafana datasource UID for the Prometheus instance.
+        instance_name: The logical name of the Prometheus instance.
         promql: PromQL expression to evaluate.
         time: Evaluation timestamp (RFC3339 or Unix timestamp). Default: now.
 
@@ -179,8 +219,8 @@ def query(datasource_uid: str, promql: str, time: str | None = None) -> dict[str
         Query result as a dictionary with 'resultType' and 'result' keys.
 
     Example:
-        >>> result = query("my-prometheus-uid", "up")
-        >>> result = query("my-prometheus-uid", "rate(http_requests_total[5m])", time="2024-01-01T00:00:00Z")
+        >>> result = query("ethpandaops", "up")
+        >>> result = query("ethpandaops", "rate(http_requests_total[5m])", time="2024-01-01T00:00:00Z")
     """
     params: dict[str, str] = {"query": promql}
 
@@ -189,30 +229,31 @@ def query(datasource_uid: str, promql: str, time: str | None = None) -> dict[str
     else:
         params["time"] = str(int(time_module.time()))
 
-    with _get_client() as client:
-        url = f"/api/datasources/proxy/uid/{datasource_uid}/api/v1/query"
-        response = client.get(url, params=params)
+    with _get_client(instance_name) as client:
+        response = client.get("/api/v1/query", params=params)
         response.raise_for_status()
 
         data = response.json()
 
         if data.get("status") != "success":
-            raise ValueError(f"Prometheus query failed: {data.get('error', 'Unknown error')}")
+            raise ValueError(
+                f"Prometheus query failed: {data.get('error', 'Unknown error')}"
+            )
 
         return data["data"]
 
 
 def query_range(
-    datasource_uid: str,
+    instance_name: str,
     promql: str,
     start: str,
     end: str,
     step: str,
 ) -> dict[str, Any]:
-    """Execute a range PromQL query via Grafana proxy.
+    """Execute a range PromQL query.
 
     Args:
-        datasource_uid: The Grafana datasource UID for the Prometheus instance.
+        instance_name: The logical name of the Prometheus instance.
         promql: PromQL expression to evaluate.
         start: Start timestamp (e.g., "now-1h", RFC3339, or Unix timestamp).
         end: End timestamp (e.g., "now", RFC3339, or Unix timestamp).
@@ -223,7 +264,7 @@ def query_range(
 
     Example:
         >>> result = query_range(
-        ...     "my-prometheus-uid",
+        ...     "ethpandaops",
         ...     "rate(http_requests_total[5m])",
         ...     start="now-1h",
         ...     end="now",
@@ -234,62 +275,65 @@ def query_range(
         "query": promql,
         "start": str(_parse_time(start)),
         "end": str(_parse_time(end)),
-        "step": str(_parse_duration(step)),
+        "step": str(parse_duration(step)),
     }
 
-    with _get_client() as client:
-        url = f"/api/datasources/proxy/uid/{datasource_uid}/api/v1/query_range"
-        response = client.get(url, params=params)
+    with _get_client(instance_name) as client:
+        response = client.get("/api/v1/query_range", params=params)
         response.raise_for_status()
 
         data = response.json()
 
         if data.get("status") != "success":
-            raise ValueError(f"Prometheus query failed: {data.get('error', 'Unknown error')}")
+            raise ValueError(
+                f"Prometheus query failed: {data.get('error', 'Unknown error')}"
+            )
 
         return data["data"]
 
 
-def get_labels(datasource_uid: str) -> list[str]:
-    """Get all label names via Grafana proxy.
+def get_labels(instance_name: str) -> list[str]:
+    """Get all label names.
 
     Args:
-        datasource_uid: The Grafana datasource UID for the Prometheus instance.
+        instance_name: The logical name of the Prometheus instance.
 
     Returns:
         List of label names.
     """
-    with _get_client() as client:
-        url = f"/api/datasources/proxy/uid/{datasource_uid}/api/v1/labels"
-        response = client.get(url)
+    with _get_client(instance_name) as client:
+        response = client.get("/api/v1/labels")
         response.raise_for_status()
 
         data = response.json()
 
         if data.get("status") != "success":
-            raise ValueError(f"Failed to get labels: {data.get('error', 'Unknown error')}")
+            raise ValueError(
+                f"Failed to get labels: {data.get('error', 'Unknown error')}"
+            )
 
         return data["data"]
 
 
-def get_label_values(datasource_uid: str, label: str) -> list[str]:
-    """Get all values for a label via Grafana proxy.
+def get_label_values(instance_name: str, label: str) -> list[str]:
+    """Get all values for a label.
 
     Args:
-        datasource_uid: The Grafana datasource UID for the Prometheus instance.
+        instance_name: The logical name of the Prometheus instance.
         label: Label name.
 
     Returns:
         List of label values.
     """
-    with _get_client() as client:
-        url = f"/api/datasources/proxy/uid/{datasource_uid}/api/v1/label/{label}/values"
-        response = client.get(url)
+    with _get_client(instance_name) as client:
+        response = client.get(f"/api/v1/label/{label}/values")
         response.raise_for_status()
 
         data = response.json()
 
         if data.get("status") != "success":
-            raise ValueError(f"Failed to get label values: {data.get('error', 'Unknown error')}")
+            raise ValueError(
+                f"Failed to get label values: {data.get('error', 'Unknown error')}"
+            )
 
         return data["data"]

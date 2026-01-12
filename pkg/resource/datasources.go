@@ -8,64 +8,102 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/sirupsen/logrus"
 
-	"github.com/ethpandaops/xatu-mcp/pkg/grafana"
+	"github.com/ethpandaops/xatu-mcp/pkg/config"
 )
 
 // datasourcesResponse is the JSON response for datasources://list.
 type datasourcesResponse struct {
-	Datasources []datasourceData `json:"datasources"`
-	Count       int              `json:"count"`
+	ClickHouse []clickHouseData   `json:"clickhouse"`
+	Prometheus []prometheusData   `json:"prometheus"`
+	Loki       []lokiInstanceData `json:"loki"`
 }
 
-type datasourceData struct {
-	UID         string `json:"uid"`
+type clickHouseData struct {
 	Name        string `json:"name"`
-	Type        string `json:"type"`
-	TypeNorm    string `json:"type_normalized"`
 	Description string `json:"description,omitempty"`
+	Database    string `json:"database"`
 }
 
-// datasourcesByTypeResponse is the JSON response for datasources://{type}.
-type datasourcesByTypeResponse struct {
-	Type        string           `json:"type"`
-	Datasources []datasourceData `json:"datasources"`
-	Count       int              `json:"count"`
+type prometheusData struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	URL         string `json:"url"`
+}
+
+type lokiInstanceData struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	URL         string `json:"url"`
+}
+
+// clickHouseListResponse is the JSON response for datasources://clickhouse.
+type clickHouseListResponse struct {
+	Clusters []clickHouseData `json:"clusters"`
+	Count    int              `json:"count"`
+}
+
+// prometheusListResponse is the JSON response for datasources://prometheus.
+type prometheusListResponse struct {
+	Instances []prometheusData `json:"instances"`
+	Count     int              `json:"count"`
+}
+
+// lokiListResponse is the JSON response for datasources://loki.
+type lokiListResponse struct {
+	Instances []lokiInstanceData `json:"instances"`
+	Count     int                `json:"count"`
 }
 
 // RegisterDatasourcesResources registers the datasources:// resources with the registry.
 func RegisterDatasourcesResources(
 	log logrus.FieldLogger,
 	reg Registry,
-	grafanaClient grafana.Client,
+	chConfigs []config.ClickHouseConfig,
+	promConfigs []config.PrometheusConfig,
+	lokiConfigs []config.LokiConfig,
 ) {
 	log = log.WithField("resource", "datasources")
 
 	// Register static datasources://list resource
 	reg.RegisterStatic(StaticResource{
-		Resource: mcp.NewResource(
-			"datasources://list",
-			"Available Datasources",
-			mcp.WithResourceDescription("List all Grafana datasources available for queries (ClickHouse, Prometheus, Loki)"),
-			mcp.WithMIMEType("application/json"),
-			mcp.WithAnnotations([]mcp.Role{mcp.RoleAssistant}, 0.8),
-		),
+		Resource: mcp.Resource{
+			URI:         "datasources://list",
+			Name:        "Available Datasources",
+			Description: "List all datasources available for queries (ClickHouse, Prometheus, Loki)",
+			MIMEType:    "application/json",
+		},
 		Handler: func(_ context.Context, _ string) (string, error) {
-			datasources := grafanaClient.ListDatasources()
-			data := make([]datasourceData, 0, len(datasources))
+			chData := make([]clickHouseData, 0, len(chConfigs))
+			for _, ch := range chConfigs {
+				chData = append(chData, clickHouseData{
+					Name:        ch.Name,
+					Description: ch.Description,
+					Database:    ch.Database,
+				})
+			}
 
-			for _, ds := range datasources {
-				data = append(data, datasourceData{
-					UID:         ds.UID,
-					Name:        ds.Name,
-					Type:        ds.Type,
-					TypeNorm:    string(ds.TypeNorm),
-					Description: ds.Description,
+			promData := make([]prometheusData, 0, len(promConfigs))
+			for _, p := range promConfigs {
+				promData = append(promData, prometheusData{
+					Name:        p.Name,
+					Description: p.Description,
+					URL:         p.URL,
+				})
+			}
+
+			lData := make([]lokiInstanceData, 0, len(lokiConfigs))
+			for _, l := range lokiConfigs {
+				lData = append(lData, lokiInstanceData{
+					Name:        l.Name,
+					Description: l.Description,
+					URL:         l.URL,
 				})
 			}
 
 			response := datasourcesResponse{
-				Datasources: data,
-				Count:       len(data),
+				ClickHouse: chData,
+				Prometheus: promData,
+				Loki:       lData,
 			}
 
 			jsonData, err := json.MarshalIndent(response, "", "  ")
@@ -77,75 +115,101 @@ func RegisterDatasourcesResources(
 		},
 	})
 
-	// Priority by datasource type (ClickHouse is primary, others are secondary)
-	typePriority := map[grafana.DatasourceType]float64{
-		grafana.DatasourceTypeClickHouse: 0.7,
-		grafana.DatasourceTypePrometheus: 0.5,
-		grafana.DatasourceTypeLoki:       0.5,
-	}
+	// Register datasources://clickhouse
+	reg.RegisterStatic(StaticResource{
+		Resource: mcp.Resource{
+			URI:         "datasources://clickhouse",
+			Name:        "ClickHouse Clusters",
+			Description: "List available ClickHouse clusters",
+			MIMEType:    "application/json",
+		},
+		Handler: func(_ context.Context, _ string) (string, error) {
+			data := make([]clickHouseData, 0, len(chConfigs))
+			for _, ch := range chConfigs {
+				data = append(data, clickHouseData{
+					Name:        ch.Name,
+					Description: ch.Description,
+					Database:    ch.Database,
+				})
+			}
 
-	// Register static resources for each datasource type
-	for _, dsType := range []grafana.DatasourceType{
-		grafana.DatasourceTypeClickHouse,
-		grafana.DatasourceTypePrometheus,
-		grafana.DatasourceTypeLoki,
-	} {
-		dsTypeStr := string(dsType)
+			response := clickHouseListResponse{
+				Clusters: data,
+				Count:    len(data),
+			}
 
-		reg.RegisterStatic(StaticResource{
-			Resource: mcp.NewResource(
-				fmt.Sprintf("datasources://%s", dsTypeStr),
-				fmt.Sprintf("%s Datasources", capitalize(dsTypeStr)),
-				mcp.WithResourceDescription(fmt.Sprintf("List available %s datasources", dsTypeStr)),
-				mcp.WithMIMEType("application/json"),
-				mcp.WithAnnotations([]mcp.Role{mcp.RoleAssistant}, typePriority[dsType]),
-			),
-			Handler: createDatasourceTypeHandler(grafanaClient, dsType),
-		})
-	}
+			jsonData, err := json.MarshalIndent(response, "", "  ")
+			if err != nil {
+				return "", fmt.Errorf("marshaling clickhouse response: %w", err)
+			}
+
+			return string(jsonData), nil
+		},
+	})
+
+	// Register datasources://prometheus
+	reg.RegisterStatic(StaticResource{
+		Resource: mcp.Resource{
+			URI:         "datasources://prometheus",
+			Name:        "Prometheus Instances",
+			Description: "List available Prometheus instances",
+			MIMEType:    "application/json",
+		},
+		Handler: func(_ context.Context, _ string) (string, error) {
+			data := make([]prometheusData, 0, len(promConfigs))
+			for _, p := range promConfigs {
+				data = append(data, prometheusData{
+					Name:        p.Name,
+					Description: p.Description,
+					URL:         p.URL,
+				})
+			}
+
+			response := prometheusListResponse{
+				Instances: data,
+				Count:     len(data),
+			}
+
+			jsonData, err := json.MarshalIndent(response, "", "  ")
+			if err != nil {
+				return "", fmt.Errorf("marshaling prometheus response: %w", err)
+			}
+
+			return string(jsonData), nil
+		},
+	})
+
+	// Register datasources://loki
+	reg.RegisterStatic(StaticResource{
+		Resource: mcp.Resource{
+			URI:         "datasources://loki",
+			Name:        "Loki Instances",
+			Description: "List available Loki instances",
+			MIMEType:    "application/json",
+		},
+		Handler: func(_ context.Context, _ string) (string, error) {
+			data := make([]lokiInstanceData, 0, len(lokiConfigs))
+			for _, l := range lokiConfigs {
+				data = append(data, lokiInstanceData{
+					Name:        l.Name,
+					Description: l.Description,
+					URL:         l.URL,
+				})
+			}
+
+			response := lokiListResponse{
+				Instances: data,
+				Count:     len(data),
+			}
+
+			jsonData, err := json.MarshalIndent(response, "", "  ")
+			if err != nil {
+				return "", fmt.Errorf("marshaling loki response: %w", err)
+			}
+
+			return string(jsonData), nil
+		},
+	})
 
 	log.Debug("Registered datasources resources")
-}
-
-// createDatasourceTypeHandler creates a handler for listing datasources of a specific type.
-func createDatasourceTypeHandler(
-	grafanaClient grafana.Client,
-	dsType grafana.DatasourceType,
-) func(context.Context, string) (string, error) {
-	return func(_ context.Context, _ string) (string, error) {
-		datasources := grafanaClient.ListDatasourcesByType(dsType)
-		data := make([]datasourceData, 0, len(datasources))
-
-		for _, ds := range datasources {
-			data = append(data, datasourceData{
-				UID:         ds.UID,
-				Name:        ds.Name,
-				Type:        ds.Type,
-				TypeNorm:    string(ds.TypeNorm),
-				Description: ds.Description,
-			})
-		}
-
-		response := datasourcesByTypeResponse{
-			Type:        string(dsType),
-			Datasources: data,
-			Count:       len(data),
-		}
-
-		jsonData, err := json.MarshalIndent(response, "", "  ")
-		if err != nil {
-			return "", fmt.Errorf("marshaling datasources response: %w", err)
-		}
-
-		return string(jsonData), nil
-	}
-}
-
-// capitalize returns the string with the first letter capitalized.
-func capitalize(s string) string {
-	if s == "" {
-		return s
-	}
-
-	return string(s[0]-32) + s[1:]
 }

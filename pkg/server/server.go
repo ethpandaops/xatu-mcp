@@ -17,7 +17,6 @@ import (
 	"github.com/ethpandaops/xatu-mcp/internal/version"
 	"github.com/ethpandaops/xatu-mcp/pkg/auth"
 	"github.com/ethpandaops/xatu-mcp/pkg/config"
-	"github.com/ethpandaops/xatu-mcp/pkg/grafana"
 	"github.com/ethpandaops/xatu-mcp/pkg/observability"
 	"github.com/ethpandaops/xatu-mcp/pkg/resource"
 	"github.com/ethpandaops/xatu-mcp/pkg/sandbox"
@@ -47,7 +46,6 @@ type service struct {
 	toolRegistry     tool.Registry
 	resourceRegistry resource.Registry
 	sandbox          sandbox.Service
-	grafana          grafana.Client
 	auth             auth.SimpleService
 	mcpServer        *mcpserver.MCPServer
 	sseServer        *mcpserver.SSEServer
@@ -65,7 +63,6 @@ func NewService(
 	toolRegistry tool.Registry,
 	resourceRegistry resource.Registry,
 	sandboxSvc sandbox.Service,
-	grafanaClient grafana.Client,
 	authSvc auth.SimpleService,
 ) Service {
 	return &service{
@@ -75,7 +72,6 @@ func NewService(
 		toolRegistry:     toolRegistry,
 		resourceRegistry: resourceRegistry,
 		sandbox:          sandboxSvc,
-		grafana:          grafanaClient,
 		auth:             authSvc,
 		done:             make(chan struct{}),
 	}
@@ -162,13 +158,6 @@ func (s *service) Stop() error {
 	if s.auth != nil {
 		if err := s.auth.Stop(); err != nil {
 			s.log.WithError(err).Error("Failed to stop auth service")
-		}
-	}
-
-	// Stop the Grafana client.
-	if s.grafana != nil {
-		if err := s.grafana.Stop(); err != nil {
-			s.log.WithError(err).Error("Failed to stop Grafana client")
 		}
 	}
 

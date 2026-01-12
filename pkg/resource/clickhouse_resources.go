@@ -21,10 +21,9 @@ type TablesListResponse struct {
 
 // ClusterTablesSummary is a compact summary of tables in a cluster.
 type ClusterTablesSummary struct {
-	DatasourceUID string          `json:"datasource_uid"`
-	Tables        []*TableSummary `json:"tables"`
-	TableCount    int             `json:"table_count"`
-	LastUpdated   string          `json:"last_updated"`
+	Tables      []*TableSummary `json:"tables"`
+	TableCount  int             `json:"table_count"`
+	LastUpdated string          `json:"last_updated"`
 }
 
 // TableSummary is a compact overview of a table for the list view.
@@ -37,9 +36,8 @@ type TableSummary struct {
 
 // TableDetailResponse is the response for clickhouse://tables/{table_name}.
 type TableDetailResponse struct {
-	Table      *TableSchema `json:"table"`
-	Cluster    string       `json:"cluster"`
-	Datasource string       `json:"datasource_uid"`
+	Table   *TableSchema `json:"table"`
+	Cluster string       `json:"cluster"`
 }
 
 // RegisterClickHouseSchemaResources registers ClickHouse schema resources with the registry.
@@ -94,10 +92,9 @@ func createTablesListHandler(client ClickHouseSchemaClient) ReadHandler {
 		// Build cluster summaries
 		for clusterName, cluster := range allTables {
 			summary := &ClusterTablesSummary{
-				DatasourceUID: cluster.DatasourceUID,
-				Tables:        make([]*TableSummary, 0, len(cluster.Tables)),
-				TableCount:    len(cluster.Tables),
-				LastUpdated:   cluster.LastUpdated.Format("2006-01-02T15:04:05Z"),
+				Tables:      make([]*TableSummary, 0, len(cluster.Tables)),
+				TableCount:  len(cluster.Tables),
+				LastUpdated: cluster.LastUpdated.Format("2006-01-02T15:04:05Z"),
 			}
 
 			// Sort table names for consistent output
@@ -170,12 +167,9 @@ func createTableDetailHandler(log logrus.FieldLogger, client ClickHouseSchemaCli
 			return "", fmt.Errorf("table %q not found. Available tables: %s", tableName, strings.Join(availableTables, ", "))
 		}
 
-		clusterTables, _ := client.GetTablesByCluster(clusterName)
-
 		response := &TableDetailResponse{
-			Table:      schema,
-			Cluster:    clusterName,
-			Datasource: clusterTables.DatasourceUID,
+			Table:   schema,
+			Cluster: clusterName,
 		}
 
 		data, err := json.MarshalIndent(response, "", "  ")

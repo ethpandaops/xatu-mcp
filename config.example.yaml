@@ -7,47 +7,67 @@ server:
   port: 2480
   base_url: "http://localhost:2480"
 
-# Grafana configuration
-# All data queries (ClickHouse, Prometheus, Loki) are proxied through Grafana.
-# This simplifies credential management - you only need a single Grafana service token.
-grafana:
-  url: "${GRAFANA_URL}"  # e.g., https://grafana.ethpandaops.io
-  service_token: "${GRAFANA_SERVICE_TOKEN}"  # Service account token with datasource:read and datasource:query permissions
-  timeout: 120  # seconds
+# ClickHouse configuration
+# Direct connections to ClickHouse clusters for data queries.
+clickhouse:
+  # Main Xatu cluster - raw event data
+  - name: "xatu"
+    description: |
+      Main Xatu ClickHouse cluster with raw Ethereum event data.
+      Contains beacon chain events (blocks, attestations, blob sidecars, etc.)
+      and execution layer data across mainnet, sepolia, holesky networks.
+      IMPORTANT: Always filter by slot_start_date_time (partition key) AND meta_network_name.
+      Use clickhouse://tables/{table} to discover available tables and columns.
+    host: "${CLICKHOUSE_XATU_HOST}"  # e.g., clickhouse.example.com:9440
+    database: "${CLICKHOUSE_XATU_DATABASE}"
+    username: "${CLICKHOUSE_XATU_USERNAME}"
+    password: "${CLICKHOUSE_XATU_PASSWORD}"
+    secure: true  # Use TLS (default: true)
+    skip_verify: false  # Skip TLS cert verification (default: false)
+    timeout: 120  # Query timeout in seconds
 
-  # Datasources configuration with descriptions for LLM context
-  # If specified, only these datasources are exposed
-  # Each datasource can have a description that provides context for the LLM
-  datasources:
-    # Main Xatu cluster - raw event data
-    - uid: "your-xatu-clickhouse-uid"
-      description: |
-        Main Xatu ClickHouse cluster with raw Ethereum event data.
-        Contains beacon chain events (blocks, attestations, blob sidecars, etc.)
-        and execution layer data across mainnet, sepolia, holesky networks.
-        IMPORTANT: Always filter by slot_start_date_time (partition key) AND meta_network_name.
-        Use clickhouse://tables/{table} to discover available tables and columns.
+  # Pre-aggregated CBT data
+  - name: "xatu-cbt"
+    description: |
+      Xatu CBT (ClickHouse Build Tool) cluster with pre-aggregated timing data.
+      Contains block timing analysis, attestation accuracy by entity, and
+      validator performance metrics. Faster queries than raw data.
+      Tables are partitioned by slot_start_date_time. Always include time filters.
+      Use clickhouse://tables/{table} to discover available tables.
+    host: "${CLICKHOUSE_CBT_HOST}"
+    database: "${CLICKHOUSE_CBT_DATABASE}"
+    username: "${CLICKHOUSE_CBT_USERNAME}"
+    password: "${CLICKHOUSE_CBT_PASSWORD}"
+    secure: true
+    timeout: 120
 
-    # Pre-aggregated CBT data
-    - uid: "your-xatu-cbt-clickhouse-uid"
-      description: |
-        Xatu CBT (Consensus Block Timing) cluster with pre-aggregated timing data.
-        Contains block timing analysis, attestation accuracy by entity, and
-        validator performance metrics. Faster queries than raw data.
-        Tables are partitioned by slot_start_date_time. Always include time filters.
-        Use clickhouse://tables/{table} to discover available tables.
+# Prometheus configuration
+# Direct connections to Prometheus/VictoriaMetrics instances.
+prometheus:
+  - name: "ethpandaops"
+    description: |
+      Prometheus/VictoriaMetrics for infrastructure metrics.
+      Contains beacon node metrics, validator metrics, and system health data.
+      Common labels: ingress_user, container, pod, namespace, instance.
+    url: "${PROMETHEUS_URL}"  # e.g., https://prometheus.example.com
+    username: "${PROMETHEUS_USERNAME}"  # Optional (for basic auth)
+    password: "${PROMETHEUS_PASSWORD}"  # Optional
+    skip_verify: false  # Skip TLS cert verification (default: false)
+    timeout: 60  # Query timeout in seconds
 
-    - uid: "your-loki-uid"
-      description: |
-        Loki cluster for beacon node and validator logs.
-        Must filter by label (e.g., ingress_user, container, pod, namespace).
-        Common queries: error patterns, consensus issues, peer connectivity.
-
-    - uid: "your-prometheus-uid"
-      description: |
-        Prometheus/VictoriaMetrics for infrastructure metrics.
-        Contains beacon node metrics, validator metrics, and system health data.
-        Common labels: ingress_user, container, pod, namespace, instance.
+# Loki configuration
+# Direct connections to Loki instances for log queries.
+loki:
+  - name: "ethpandaops"
+    description: |
+      Loki cluster for beacon node and validator logs.
+      Must filter by label (e.g., ingress_user, container, pod, namespace).
+      Common queries: error patterns, consensus issues, peer connectivity.
+    url: "${LOKI_URL}"  # e.g., https://loki.example.com
+    username: "${LOKI_USERNAME}"  # Optional (for basic auth)
+    password: "${LOKI_PASSWORD}"  # Optional
+    skip_verify: false  # Skip TLS cert verification (default: false)
+    timeout: 60  # Query timeout in seconds
 
 # Sandbox configuration
 sandbox:
@@ -104,16 +124,16 @@ observability:
   # otlp_endpoint: "${OTLP_ENDPOINT}"
 
 # ClickHouse schema discovery configuration
-# Discovers table schemas from configured ClickHouse datasources via Grafana.
-# Each datasource must be explicitly configured with its Grafana UID and cluster name.
+# Discovers table schemas from configured ClickHouse clusters.
+# Each datasource must reference a name from the clickhouse config above.
 schema_discovery:
   # enabled: true  # Defaults to true if datasources are configured
   refresh_interval: 15m  # How often to refresh schema cache
 
   # Datasources to discover schemas from
-  # Each entry maps a Grafana datasource UID to a logical cluster name
+  # Each entry maps a ClickHouse cluster name to a logical cluster name
   datasources:
-    - uid: "your-clickhouse-datasource-uid"
-      cluster: "xatu"
-    - uid: "your-clickhouse-cbt-datasource-uid"
+    - name: "xatu"      # References clickhouse[].name above
+      cluster: "xatu"   # Logical cluster name for resources
+    - name: "xatu-cbt"
       cluster: "xatu-cbt"

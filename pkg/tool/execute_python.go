@@ -2,8 +2,8 @@ package tool
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -15,14 +15,62 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// sessionsWithResourceTip tracks sessions that have already seen the resource tip.
-var sessionsWithResourceTip sync.Map
+const (
+	// resourceTipCacheMaxSize is the maximum number of entries in the resource tip cache.
+	resourceTipCacheMaxSize = 1000
+	// resourceTipCacheMaxAge is the maximum age of entries in the resource tip cache.
+	resourceTipCacheMaxAge = 4 * time.Hour
+)
+
+// resourceTipCache tracks sessions that have already seen the resource tip.
+// It's a bounded cache with automatic cleanup of old entries.
+type resourceTipCache struct {
+	mu      sync.Mutex
+	entries map[string]time.Time
+}
+
+var sessionsWithResourceTip = &resourceTipCache{
+	entries: make(map[string]time.Time, 64),
+}
+
+// markShown marks a session as having seen the resource tip.
+// Returns true if this is the first time the session has seen the tip.
+func (c *resourceTipCache) markShown(sessionKey string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Check if already shown.
+	if _, exists := c.entries[sessionKey]; exists {
+		return false
+	}
+
+	// Clean up old entries if cache is too large.
+	if len(c.entries) >= resourceTipCacheMaxSize {
+		c.cleanupLocked()
+	}
+
+	c.entries[sessionKey] = time.Now()
+
+	return true
+}
+
+// cleanupLocked removes entries older than resourceTipCacheMaxAge.
+// Must be called with mu held.
+func (c *resourceTipCache) cleanupLocked() {
+	cutoff := time.Now().Add(-resourceTipCacheMaxAge)
+
+	for key, ts := range c.entries {
+		if ts.Before(cutoff) {
+			delete(c.entries, key)
+		}
+	}
+}
 
 // resourceTipMessage is shown after the first execution in a session to guide users to MCP resources.
 const resourceTipMessage = `
-💡 TIP: Read these MCP resources for available datasources and schemas:
-   - datasources://list - available datasource UIDs
-   - datasources://clickhouse - ClickHouse datasources only
+TIP: Read these MCP resources for available datasources and schemas:
+   - datasources://list - available datasources by type
+   - datasources://clickhouse - ClickHouse clusters only
    - clickhouse://tables - list all tables (if schema discovery enabled)
    - clickhouse://tables/{table} - table schema details
    - api://xatu - Python library documentation
@@ -133,7 +181,12 @@ func newExecutePythonHandler(
 		}).Info("Executing Python code")
 
 		// Build environment variables for the sandbox.
-		env := buildSandboxEnv(cfg)
+		env, err := buildSandboxEnv(cfg)
+		if err != nil {
+			handlerLog.WithError(err).Error("Failed to build sandbox environment")
+
+			return CallToolError(fmt.Errorf("failed to configure sandbox: %w", err)), nil
+		}
 
 		// Execute the code in the sandbox.
 		result, err := sandboxSvc.Execute(ctx, sandbox.ExecuteRequest{
@@ -158,7 +211,7 @@ func newExecutePythonHandler(
 			sessionKey = result.ExecutionID // Use execution ID if no session
 		}
 
-		if _, alreadyShown := sessionsWithResourceTip.LoadOrStore(sessionKey, true); !alreadyShown {
+		if sessionsWithResourceTip.markShown(sessionKey) {
 			response += resourceTipMessage
 		}
 
@@ -238,13 +291,38 @@ func formatSize(bytes int64) string {
 }
 
 // buildSandboxEnv creates the environment variables map for the sandbox.
-func buildSandboxEnv(cfg *config.Config) map[string]string {
+func buildSandboxEnv(cfg *config.Config) (map[string]string, error) {
 	env := make(map[string]string, 8)
 
-	// Grafana configuration - all datasource queries route through Grafana.
-	env["XATU_GRAFANA_URL"] = cfg.Grafana.URL
-	env["XATU_GRAFANA_TOKEN"] = cfg.Grafana.ServiceToken
-	env["XATU_HTTP_TIMEOUT"] = strconv.Itoa(cfg.Grafana.Timeout)
+	// ClickHouse configs as JSON array.
+	if len(cfg.ClickHouse) > 0 {
+		chConfigs, err := json.Marshal(cfg.ClickHouse)
+		if err != nil {
+			return nil, fmt.Errorf("marshaling ClickHouse configs: %w", err)
+		}
+
+		env["XATU_CLICKHOUSE_CONFIGS"] = string(chConfigs)
+	}
+
+	// Prometheus configs as JSON array.
+	if len(cfg.Prometheus) > 0 {
+		promConfigs, err := json.Marshal(cfg.Prometheus)
+		if err != nil {
+			return nil, fmt.Errorf("marshaling Prometheus configs: %w", err)
+		}
+
+		env["XATU_PROMETHEUS_CONFIGS"] = string(promConfigs)
+	}
+
+	// Loki configs as JSON array.
+	if len(cfg.Loki) > 0 {
+		lokiConfigs, err := json.Marshal(cfg.Loki)
+		if err != nil {
+			return nil, fmt.Errorf("marshaling Loki configs: %w", err)
+		}
+
+		env["XATU_LOKI_CONFIGS"] = string(lokiConfigs)
+	}
 
 	// S3 Storage.
 	if cfg.Storage != nil {
@@ -259,5 +337,5 @@ func buildSandboxEnv(cfg *config.Config) map[string]string {
 		}
 	}
 
-	return env
+	return env, nil
 }
