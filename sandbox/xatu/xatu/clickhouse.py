@@ -56,6 +56,7 @@ class _ClusterConfig:
     skip_verify: bool
     timeout: int
     description: str
+    protocol: str  # "native" or "http"
 
 
 # Cache for cluster configurations.
@@ -82,9 +83,13 @@ def _load_clusters() -> None:
 
     _CLUSTERS = {}
     for cfg in configs:
+        # Get protocol setting (default to "native")
+        protocol = cfg.get("protocol", "native")
+
         # Parse host:port with IPv6 support using URL parsing
         raw_host = cfg.get("host", "")
-        port = 9440  # Default secure port
+        # Default port based on protocol
+        port = 443 if protocol == "http" else 9440
 
         # Try to parse as a URL to handle IPv6 addresses like [::1]:9440
         if raw_host.startswith("[") or "://" in raw_host:
@@ -126,6 +131,7 @@ def _load_clusters() -> None:
             skip_verify=skip_verify,
             timeout=cfg.get("timeout", 120),
             description=cfg.get("description", ""),
+            protocol=protocol,
         )
         _CLUSTERS[cluster.name] = cluster
 
@@ -222,11 +228,11 @@ def query(
 
     try:
         if parameters:
-            result = client.query(sql, parameters=parameters)
+            result = client.query_df(sql, parameters=parameters)
         else:
-            result = client.query(sql)
+            result = client.query_df(sql)
 
-        return result.result_set_df()
+        return result
     except Exception as e:
         error_msg = str(e)
 

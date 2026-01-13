@@ -18,10 +18,11 @@ clickhouse:
       and execution layer data across mainnet, sepolia, holesky networks.
       IMPORTANT: Always filter by slot_start_date_time (partition key) AND meta_network_name.
       Use clickhouse://tables/{table} to discover available tables and columns.
-    host: "${CLICKHOUSE_XATU_HOST}"  # e.g., clickhouse.example.com:9440
+    host: "${CLICKHOUSE_XATU_HOST}"  # e.g., clickhouse.example.com or clickhouse.example.com:8443
     database: "${CLICKHOUSE_XATU_DATABASE}"
     username: "${CLICKHOUSE_XATU_USERNAME}"
     password: "${CLICKHOUSE_XATU_PASSWORD}"
+    protocol: http  # "native" (default) or "http" for HTTPS connections via proxies
     secure: true  # Use TLS (default: true)
     skip_verify: false  # Skip TLS cert verification (default: false)
     timeout: 120  # Query timeout in seconds
@@ -38,6 +39,7 @@ clickhouse:
     database: "${CLICKHOUSE_CBT_DATABASE}"
     username: "${CLICKHOUSE_CBT_USERNAME}"
     password: "${CLICKHOUSE_CBT_PASSWORD}"
+    protocol: http
     secure: true
     timeout: 120
 

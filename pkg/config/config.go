@@ -55,31 +55,40 @@ type ServerConfig struct {
 // ClickHouseConfig holds configuration for a ClickHouse cluster.
 type ClickHouseConfig struct {
 	// Name is the logical identifier for this cluster (required).
-	Name string `yaml:"name"`
+	Name string `yaml:"name" json:"name"`
 
 	// Description provides context about this cluster for LLM consumption.
-	Description string `yaml:"description,omitempty"`
+	Description string `yaml:"description,omitempty" json:"description,omitempty"`
 
 	// Host is the ClickHouse server address in host:port format (required).
-	Host string `yaml:"host"`
+	Host string `yaml:"host" json:"host"`
 
 	// Database is the default database to use (required).
-	Database string `yaml:"database"`
+	Database string `yaml:"database" json:"database"`
 
 	// Username is the authentication username (required).
-	Username string `yaml:"username"`
+	Username string `yaml:"username" json:"username"`
 
 	// Password is the authentication password (required).
-	Password string `yaml:"password"`
+	Password string `yaml:"password" json:"password"`
 
 	// Secure enables TLS for the connection. Defaults to true.
-	Secure *bool `yaml:"secure,omitempty"`
+	Secure *bool `yaml:"secure,omitempty" json:"secure,omitempty"`
 
 	// SkipVerify disables TLS certificate verification. Defaults to false.
-	SkipVerify bool `yaml:"skip_verify,omitempty"`
+	SkipVerify bool `yaml:"skip_verify,omitempty" json:"skip_verify,omitempty"`
 
 	// Timeout is the query timeout in seconds. Defaults to 120.
-	Timeout int `yaml:"timeout,omitempty"`
+	Timeout int `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+
+	// Protocol specifies the connection protocol: "native" or "http". Defaults to "native".
+	// Use "http" for HTTPS connections through proxies like Cloudflare.
+	Protocol string `yaml:"protocol,omitempty" json:"protocol,omitempty"`
+}
+
+// IsHTTP returns whether HTTP protocol should be used.
+func (c *ClickHouseConfig) IsHTTP() bool {
+	return c.Protocol == "http"
 }
 
 // IsSecure returns whether TLS is enabled (defaults to true).
@@ -94,49 +103,49 @@ func (c *ClickHouseConfig) IsSecure() bool {
 // PrometheusConfig holds configuration for a Prometheus instance.
 type PrometheusConfig struct {
 	// Name is the logical identifier for this instance (required).
-	Name string `yaml:"name"`
+	Name string `yaml:"name" json:"name"`
 
 	// Description provides context about this instance for LLM consumption.
-	Description string `yaml:"description,omitempty"`
+	Description string `yaml:"description,omitempty" json:"description,omitempty"`
 
 	// URL is the Prometheus server URL (required).
-	URL string `yaml:"url"`
+	URL string `yaml:"url" json:"url"`
 
 	// Username is the authentication username (optional, for basic auth).
-	Username string `yaml:"username,omitempty"`
+	Username string `yaml:"username,omitempty" json:"username,omitempty"`
 
 	// Password is the authentication password (optional, for basic auth).
-	Password string `yaml:"password,omitempty"`
+	Password string `yaml:"password,omitempty" json:"password,omitempty"`
 
 	// SkipVerify disables TLS certificate verification. Defaults to false.
-	SkipVerify bool `yaml:"skip_verify,omitempty"`
+	SkipVerify bool `yaml:"skip_verify,omitempty" json:"skip_verify,omitempty"`
 
 	// Timeout is the query timeout in seconds. Defaults to 60.
-	Timeout int `yaml:"timeout,omitempty"`
+	Timeout int `yaml:"timeout,omitempty" json:"timeout,omitempty"`
 }
 
 // LokiConfig holds configuration for a Loki instance.
 type LokiConfig struct {
 	// Name is the logical identifier for this instance (required).
-	Name string `yaml:"name"`
+	Name string `yaml:"name" json:"name"`
 
 	// Description provides context about this instance for LLM consumption.
-	Description string `yaml:"description,omitempty"`
+	Description string `yaml:"description,omitempty" json:"description,omitempty"`
 
 	// URL is the Loki server URL (required).
-	URL string `yaml:"url"`
+	URL string `yaml:"url" json:"url"`
 
 	// Username is the authentication username (optional, for basic auth).
-	Username string `yaml:"username,omitempty"`
+	Username string `yaml:"username,omitempty" json:"username,omitempty"`
 
 	// Password is the authentication password (optional, for basic auth).
-	Password string `yaml:"password,omitempty"`
+	Password string `yaml:"password,omitempty" json:"password,omitempty"`
 
 	// SkipVerify disables TLS certificate verification. Defaults to false.
-	SkipVerify bool `yaml:"skip_verify,omitempty"`
+	SkipVerify bool `yaml:"skip_verify,omitempty" json:"skip_verify,omitempty"`
 
 	// Timeout is the query timeout in seconds. Defaults to 60.
-	Timeout int `yaml:"timeout,omitempty"`
+	Timeout int `yaml:"timeout,omitempty" json:"timeout,omitempty"`
 }
 
 // SchemaDiscoveryConfig holds configuration for ClickHouse schema discovery.
