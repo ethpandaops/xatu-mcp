@@ -83,6 +83,18 @@ func (b *Builder) Build(ctx context.Context) (Service, error) {
 
 	b.log.Info("Cartographoor client started")
 
+	// Create CBT client for data transformation metadata (optional)
+	cbtClient := b.buildCBTClient(cartographoorClient)
+
+	if err := cbtClient.Start(ctx); err != nil {
+		// CBT is optional - log warning but continue without it
+		b.log.WithError(err).Warn("CBT client failed to start, CBT resources will be unavailable")
+
+		cbtClient = nil
+	} else {
+		b.log.Info("CBT client started")
+	}
+
 	// Create ClickHouse schema client for table discovery (optional)
 	schemaClient := b.buildClickHouseSchema(grafanaClient)
 
@@ -93,6 +105,10 @@ func (b *Builder) Build(ctx context.Context) (Service, error) {
 			_ = sandboxSvc.Stop(ctx)
 			_ = grafanaClient.Stop()
 			_ = cartographoorClient.Stop()
+
+			if cbtClient != nil {
+				_ = cbtClient.Stop()
+			}
 
 			return nil, fmt.Errorf("starting clickhouse schema client: %w", err)
 		}
@@ -108,6 +124,10 @@ func (b *Builder) Build(ctx context.Context) (Service, error) {
 		_ = grafanaClient.Stop()
 		_ = cartographoorClient.Stop()
 
+		if cbtClient != nil {
+			_ = cbtClient.Stop()
+		}
+
 		if schemaClient != nil {
 			_ = schemaClient.Stop()
 		}
@@ -121,6 +141,10 @@ func (b *Builder) Build(ctx context.Context) (Service, error) {
 		_ = sandboxSvc.Stop(ctx)
 		_ = grafanaClient.Stop()
 		_ = cartographoorClient.Stop()
+
+		if cbtClient != nil {
+			_ = cbtClient.Stop()
+		}
 
 		if schemaClient != nil {
 			_ = schemaClient.Stop()
@@ -137,7 +161,7 @@ func (b *Builder) Build(ctx context.Context) (Service, error) {
 	toolReg := b.buildToolRegistry(sandboxSvc)
 
 	// Create resource registry and register resources
-	resourceReg := b.buildResourceRegistry(grafanaClient, cartographoorClient, schemaClient, toolReg)
+	resourceReg := b.buildResourceRegistry(grafanaClient, cartographoorClient, cbtClient, schemaClient, toolReg)
 
 	// Create and return the server service
 	return NewService(
@@ -231,10 +255,19 @@ func (b *Builder) buildClickHouseSchema(grafanaClient grafana.Client) resource.C
 	}, grafanaClient)
 }
 
+// buildCBTClient creates the CBT client for data transformation metadata.
+func (b *Builder) buildCBTClient(cartographoor resource.CartographoorClient) resource.CBTClient {
+	return resource.NewCBTClient(b.log, resource.CBTConfig{
+		CacheTTL: resource.DefaultCBTCacheTTL,
+		Timeout:  resource.DefaultHTTPTimeout,
+	}, cartographoor)
+}
+
 // buildResourceRegistry creates and populates the resource registry.
 func (b *Builder) buildResourceRegistry(
 	grafanaClient grafana.Client,
 	cartographoorClient resource.CartographoorClient,
+	cbtClient resource.CBTClient,
 	schemaClient resource.ClickHouseSchemaClient,
 	toolReg tool.Registry,
 ) resource.Registry {
@@ -246,8 +279,8 @@ func (b *Builder) buildResourceRegistry(
 	// Register examples resources
 	resource.RegisterExamplesResources(b.log, reg)
 
-	// Register networks resources
-	resource.RegisterNetworksResources(b.log, reg, cartographoorClient)
+	// Register networks resources with optional CBT client
+	resource.RegisterNetworksResources(b.log, reg, cartographoorClient, cbtClient)
 
 	// Register API resources
 	resource.RegisterAPIResources(b.log, reg)
@@ -258,6 +291,11 @@ func (b *Builder) buildResourceRegistry(
 	// Register ClickHouse schema resources if schema discovery is enabled
 	if schemaClient != nil {
 		resource.RegisterClickHouseSchemaResources(b.log, reg, schemaClient)
+	}
+
+	// Register CBT resources if CBT client is available
+	if cbtClient != nil {
+		resource.RegisterCBTResources(b.log, reg, cbtClient)
 	}
 
 	staticCount := len(reg.ListStatic())

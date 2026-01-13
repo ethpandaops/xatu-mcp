@@ -6,7 +6,7 @@ require (
 	github.com/containerd/errdefs v1.0.0
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-units v0.5.0
-	github.com/ethpandaops/cartographoor v0.0.0-20251127030017-c3c31f6c6ecc
+	github.com/ethpandaops/cartographoor v0.0.0-20260112062439-3b11d876f1ea
 	github.com/go-chi/chi/v5 v5.2.3
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/uuid v1.6.0

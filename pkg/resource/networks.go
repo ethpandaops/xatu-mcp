@@ -15,12 +15,20 @@ import (
 // networkURIPattern matches networks://{name} URIs.
 var networkURIPattern = regexp.MustCompile(`^networks://(.+)$`)
 
+// CBTSummary provides a compact overview of CBT availability for a network.
+// Models are universal across networks - see cbt:// resources for details.
+type CBTSummary struct {
+	Available bool   `json:"available"`
+	ModelsURI string `json:"models_uri,omitempty"`
+}
+
 // NetworkSummary is a compact representation for the active networks list.
 type NetworkSummary struct {
-	Name     string   `json:"name"`
-	ChainID  uint64   `json:"chain_id,omitempty"`
-	Clusters []string `json:"clusters"`
-	Status   string   `json:"status"`
+	Name     string      `json:"name"`
+	ChainID  uint64      `json:"chain_id,omitempty"`
+	Clusters []string    `json:"clusters"`
+	Status   string      `json:"status"`
+	CBT      *CBTSummary `json:"cbt,omitempty"`
 }
 
 // NetworksActiveResponse is the response for networks://active.
@@ -45,6 +53,7 @@ type NetworksAllResponse struct {
 // NetworkDetailResponse is the response for networks://{name} (single network).
 type NetworkDetailResponse struct {
 	Network NetworkWithClusters `json:"network"`
+	CBT     *CBTSummary         `json:"cbt,omitempty"`
 }
 
 // GroupDetailResponse is the response for networks://{group} (devnet group).
@@ -54,7 +63,8 @@ type GroupDetailResponse struct {
 }
 
 // RegisterNetworksResources registers all network-related resources with the registry.
-func RegisterNetworksResources(log logrus.FieldLogger, reg Registry, client CartographoorClient) {
+// cbtClient can be nil if CBT is not available.
+func RegisterNetworksResources(log logrus.FieldLogger, reg Registry, client CartographoorClient, cbtClient CBTClient) {
 	log = log.WithField("resource", "networks")
 
 	// Register networks://active - compact list of active networks
@@ -65,7 +75,7 @@ func RegisterNetworksResources(log logrus.FieldLogger, reg Registry, client Cart
 			Description: "Compact list of active Ethereum networks and available devnet groups",
 			MIMEType:    "application/json",
 		},
-		Handler: createActiveNetworksHandler(client),
+		Handler: createActiveNetworksHandler(client, cbtClient),
 	})
 
 	// Register networks://all - all networks including inactive
@@ -88,14 +98,14 @@ func RegisterNetworksResources(log logrus.FieldLogger, reg Registry, client Cart
 			mcp.WithTemplateMIMEType("application/json"),
 		),
 		Pattern: networkURIPattern,
-		Handler: createNetworkDetailHandler(log, client),
+		Handler: createNetworkDetailHandler(log, client, cbtClient),
 	})
 
 	log.Debug("Registered networks resources")
 }
 
 // createActiveNetworksHandler returns a handler for networks://active.
-func createActiveNetworksHandler(client CartographoorClient) ReadHandler {
+func createActiveNetworksHandler(client CartographoorClient, cbtClient CBTClient) ReadHandler {
 	return func(_ context.Context, _ string) (string, error) {
 		networks := client.GetActiveNetworks()
 		groups := client.GetGroups()
@@ -103,12 +113,29 @@ func createActiveNetworksHandler(client CartographoorClient) ReadHandler {
 		summaries := make([]NetworkSummary, 0, len(networks))
 
 		for _, network := range networks {
-			summaries = append(summaries, NetworkSummary{
+			summary := NetworkSummary{
 				Name:     network.Name,
 				ChainID:  network.ChainID,
 				Clusters: client.GetClusters(network),
 				Status:   network.Status,
-			})
+			}
+
+			// Add CBT summary if this network has CBT available
+			if cbtClient != nil {
+				cbtNetworks := cbtClient.GetNetworks()
+				for _, cbtNet := range cbtNetworks {
+					if cbtNet == network.Name {
+						summary.CBT = &CBTSummary{
+							Available: true,
+							ModelsURI: "cbt://models",
+						}
+
+						break
+					}
+				}
+			}
+
+			summaries = append(summaries, summary)
 		}
 
 		response := NetworksActiveResponse{
@@ -156,7 +183,7 @@ func createAllNetworksHandler(client CartographoorClient) ReadHandler {
 }
 
 // createNetworkDetailHandler returns a handler for networks://{name}.
-func createNetworkDetailHandler(log logrus.FieldLogger, client CartographoorClient) ReadHandler {
+func createNetworkDetailHandler(log logrus.FieldLogger, client CartographoorClient, cbtClient CBTClient) ReadHandler {
 	return func(_ context.Context, uri string) (string, error) {
 		matches := networkURIPattern.FindStringSubmatch(uri)
 		if len(matches) != 2 {
@@ -172,6 +199,21 @@ func createNetworkDetailHandler(log logrus.FieldLogger, client CartographoorClie
 					Network:  network,
 					Clusters: client.GetClusters(network),
 				},
+			}
+
+			// Add CBT summary if this network has CBT available
+			if cbtClient != nil {
+				cbtNetworks := cbtClient.GetNetworks()
+				for _, cbtNet := range cbtNetworks {
+					if cbtNet == name {
+						response.CBT = &CBTSummary{
+							Available: true,
+							ModelsURI: "cbt://models",
+						}
+
+						break
+					}
+				}
 			}
 
 			data, err := json.MarshalIndent(response, "", "  ")
