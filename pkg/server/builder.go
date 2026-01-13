@@ -257,8 +257,8 @@ func (b *Builder) buildResourceRegistry(
 	// Register networks resources
 	resource.RegisterNetworksResources(b.log, reg, cartographoorClient)
 
-	// Register API resources
-	resource.RegisterAPIResources(b.log, reg)
+	// Register Python library resources
+	resource.RegisterPythonResources(b.log, reg)
 
 	// Register getting-started resource (needs tool registry for dynamic content)
 	resource.RegisterGettingStartedResources(b.log, reg, toolReg)

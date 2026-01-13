@@ -40,7 +40,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 | `execute_python` | Execute Python in a sandbox with the `xatu` library |
 | `search_examples` | Search for query examples and patterns |
 
-Resources are available for datasource discovery (`datasources://`), network info (`networks://`), table schemas (`clickhouse://`), and API docs (`api://xatu`).
+Resources are available for getting started (`xatu://getting-started`), datasource discovery (`datasources://`), network info (`networks://`), table schemas (`clickhouse://`), and Python API docs (`python://xatu`).
 
 ## Development
 

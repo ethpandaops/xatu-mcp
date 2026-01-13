@@ -68,13 +68,7 @@ func (c *resourceTipCache) cleanupLocked() {
 
 // resourceTipMessage is shown after the first execution in a session to guide users to MCP resources.
 const resourceTipMessage = `
-TIP: Read these MCP resources for available datasources and schemas:
-   - datasources://list - available datasources by type
-   - datasources://clickhouse - ClickHouse clusters only
-   - clickhouse://tables - list all tables (if schema discovery enabled)
-   - clickhouse://tables/{table} - table schema details
-   - api://xatu - Python library documentation
-   - networks://active - available networks`
+TIP: Read xatu://getting-started for cluster rules and workflow guidance.`
 
 const (
 	// ExecutePythonToolName is the name of the execute_python tool.
@@ -89,16 +83,11 @@ const (
 )
 
 // executePythonDescription is the description of the execute_python tool.
-const executePythonDescription = `Execute Python code in a sandboxed environment with the xatu library pre-installed.
+const executePythonDescription = `Execute Python code with the xatu library for Ethereum data analysis.
 
-**Quick Start:**
-from xatu import clickhouse
-df = clickhouse.query('xatu-cbt', 'SELECT ... FROM mainnet.table_name ...')  # Pre-aggregated data
-df = clickhouse.query('xatu', 'SELECT ... WHERE meta_network_name = "mainnet"')  # Raw events
+**⚠️ BEFORE YOUR FIRST QUERY:** Read xatu://getting-started for workflow guidance and critical syntax rules.
 
-**Resources:** datasources://clickhouse for cluster details, clickhouse://tables/{table} for schemas, api://xatu for full API docs.
-
-**IMPORTANT - Session Reuse:** You MUST reuse session IDs across calls. When the output contains [session] id=XXX, pass that ID as session_id in ALL subsequent execute_python calls. This preserves /workspace/ files and avoids container startup overhead. Only omit session_id for the very first call.`
+Use search_examples tool for query patterns. Reuse session_id from responses.`
 
 // NewExecutePythonTool creates the execute_python tool definition.
 func NewExecutePythonTool(

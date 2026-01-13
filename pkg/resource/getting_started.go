@@ -18,53 +18,37 @@ type ToolLister interface {
 // gettingStartedHeader contains the static workflow guidance.
 const gettingStartedHeader = `# Xatu Getting Started Guide
 
-## Quick Start Workflow
+## Workflow
 
-1. **Read datasources://clickhouse** to get the exact datasource UIDs you need
-2. **Use search_examples tool** to find relevant query patterns for your task
-3. **Check clickhouse://tables/{table}** for exact column names and partition keys
-4. **Replace placeholders in examples**: Examples use ` + "`{network}`" + ` placeholder - replace with actual network (e.g., ` + "`mainnet`" + `, ` + "`sepolia`" + `)
-5. **Execute with execute_python** using the adapted example
+1. **Discover** → ` + "`datasources://clickhouse`" + ` for cluster names, ` + "`clickhouse://tables`" + ` for schemas
+2. **Find patterns** → ` + "`search_examples`" + ` tool or ` + "`examples://queries`" + ` resource
+3. **Execute** → ` + "`execute_python`" + ` tool with the xatu library
 
 ## ⚠️ CRITICAL: Cluster Rules
 
-Xatu data is split across TWO clusters with DIFFERENT query syntax:
+Xatu data is split across **TWO clusters** with **DIFFERENT syntax**:
 
 | Cluster | Contains | Table Syntax | Network Filter |
 |---------|----------|--------------|----------------|
-| **xatu** | Raw event data | ` + "`FROM table_name`" + ` | ` + "`WHERE meta_network_name = 'mainnet'`" + ` |
-| **xatu-cbt** | Aggregated data (faster) | ` + "`FROM mainnet.table_name`" + ` | Database prefix IS the filter |
+| **xatu** | Raw events | ` + "`FROM table_name`" + ` | ` + "`WHERE meta_network_name = 'mainnet'`" + ` |
+| **xatu-cbt** | Pre-aggregated | ` + "`FROM mainnet.table_name`" + ` | Database prefix IS the filter |
 
-**Key rules:**
-- Always check which cluster (` + "`cluster: xatu`" + ` or ` + "`cluster: xatu-cbt`" + `) an example uses
-- The datasource UID determines which cluster you query - check datasources://clickhouse
-- Always filter by partition column (usually ` + "`slot_start_date_time`" + `) to avoid timeouts
+**Always filter by partition column** (usually ` + "`slot_start_date_time`" + `) to avoid timeouts.
 
 ## Canonical vs Head Data
 
-- **Canonical**: Finalized data - confirmed by consensus, no reorgs possible
-- **Head**: Latest data - may be reorged, use for real-time monitoring
-- Tables often have both variants (e.g., ` + "`fct_block_head`" + ` vs ` + "`fct_block_canonical`" + `)
-- When analyzing historical data, prefer canonical tables
-- When analyzing reorgs/forks, you MUST account for survivorship bias (orphaned blocks are excluded from canonical)
+- **Canonical** = finalized (no reorgs) → use for historical analysis
+- **Head** = latest (may reorg) → use for real-time monitoring
+- Tables have variants: ` + "`fct_block_canonical`" + ` vs ` + "`fct_block_head`" + `
 `
 
 // gettingStartedFooter contains static tips.
 const gettingStartedFooter = `
-## Sessions & File Persistence
+## Sessions
 
-- Files written to ` + "`/workspace/`" + ` persist within a session
-- Pass the ` + "`session_id`" + ` from tool responses to continue a session
-- Sessions expire after inactivity - check the ` + "`ttl`" + ` in responses
-- For important outputs, use ` + "`storage.upload()`" + ` immediately to get a permanent URL
-
-## Tips
-
-- Use search_examples("block") to find block-related query patterns
-- Use search_examples("validator") to find validator-related patterns
-- Avoid spamming stdout with too much text - keep output concise
-- If the user asks for a chart or file, use storage.upload() to upload and return the URL
-  - Note: If you are Claude Code, you may need to manually recite the URL to the user towards the end of your response to avoid it being cut off.
+- **Reuse session_id** from tool responses for faster execution and file persistence
+- Files in ` + "`/workspace/`" + ` persist across calls; Python variables do NOT
+- Use ` + "`storage.upload()`" + ` for permanent URLs (see ` + "`python://xatu`" + ` for API details)
 `
 
 // RegisterGettingStartedResources registers the xatu://getting-started resource.

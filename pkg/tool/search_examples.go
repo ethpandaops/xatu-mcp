@@ -21,11 +21,9 @@ const (
 
 const searchExamplesDescription = `Search ClickHouse query examples using semantic search.
 
-Returns the top matching examples with full SQL queries. Results are filtered by minimum similarity score.
+Returns matching examples with full SQL queries. Each result includes target cluster (xatu vs xatu-cbt) - see xatu://getting-started for syntax differences.
 
-Examples:
-- search_examples(query="block") - Find block-related examples
-- search_examples(query="validator", category="validators") - Filter by category`
+Examples: search_examples(query="block"), search_examples(query="validator", category="validators")`
 
 type SearchExampleResult struct {
 	CategoryKey     string  `json:"category_key"`

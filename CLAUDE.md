@@ -129,7 +129,7 @@ Key resources exposed by the server:
 - `networks://{name}` - Specific network details
 - `clickhouse://tables` - List all tables (if schema discovery enabled)
 - `clickhouse://tables/{table}` - Table schema details
-- `api://xatu` - Python library documentation
+- `python://xatu` - Python library function signatures
 - `examples://queries` - Common query patterns
 
 ## Local Development

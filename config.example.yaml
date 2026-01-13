@@ -15,8 +15,8 @@ clickhouse:
     description: |
       Main Xatu ClickHouse cluster with raw Ethereum event data.
       Contains beacon chain events (blocks, attestations, blob sidecars, etc.)
-      and execution layer data across mainnet, sepolia, holesky networks.
-      IMPORTANT: Always filter by slot_start_date_time (partition key) AND meta_network_name.
+      and execution layer data across mainnet, sepolia, hoodi networks.
+      IMPORTANT: Always filter by the table's partition key AND meta_network_name.
       Use clickhouse://tables/{table} to discover available tables and columns.
     host: "${CLICKHOUSE_XATU_HOST}"  # e.g., clickhouse.example.com or clickhouse.example.com:8443
     database: "${CLICKHOUSE_XATU_DATABASE}"
@@ -30,10 +30,10 @@ clickhouse:
   # Pre-aggregated CBT data
   - name: "xatu-cbt"
     description: |
-      Xatu CBT (ClickHouse Build Tool) cluster with pre-aggregated timing data.
+      Xatu CBT (ClickHouse Build Tool) cluster with pre-aggregated data built on top of the raw event data in the xatu cluster.
       Contains block timing analysis, attestation accuracy by entity, and
       validator performance metrics. Faster queries than raw data.
-      Tables are partitioned by slot_start_date_time. Always include time filters.
+      IMPORTANT: Always filter by the table's partition key.
       Use clickhouse://tables/{table} to discover available tables.
     host: "${CLICKHOUSE_CBT_HOST}"
     database: "${CLICKHOUSE_CBT_DATABASE}"
