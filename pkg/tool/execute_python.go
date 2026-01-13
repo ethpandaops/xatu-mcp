@@ -91,13 +91,14 @@ const (
 // executePythonDescription is the description of the execute_python tool.
 const executePythonDescription = `Execute Python code in a sandboxed environment with the xatu library pre-installed.
 
-Read xatu://getting-started first, then api://xatu for library docs, datasources://clickhouse for UIDs.
+**Quick Start:**
+from xatu import clickhouse
+df = clickhouse.query('xatu-cbt', 'SELECT ... FROM mainnet.table_name ...')  # Pre-aggregated data
+df = clickhouse.query('xatu', 'SELECT ... WHERE meta_network_name = "mainnet"')  # Raw events
 
-Key modules: clickhouse, prometheus, loki, storage
+**Resources:** datasources://clickhouse for cluster details, clickhouse://tables/{table} for schemas, api://xatu for full API docs.
 
-**Sessions**: Files in /workspace/ persist across calls within a session. Pass the session_id from responses to continue a session. Sessions expire after inactivity - check the ttl in responses. For important outputs, use storage.upload() immediately to get a permanent URL.
-
-**Output**: Response includes [session] id=X ttl=Xm showing remaining session time.`
+**Sessions**: Files in /workspace/ persist across calls. Pass session_id from responses to continue. Use storage.upload() for permanent URLs.`
 
 // NewExecutePythonTool creates the execute_python tool definition.
 func NewExecutePythonTool(

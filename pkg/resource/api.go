@@ -45,60 +45,71 @@ var xatuAPIDocs = struct {
 	BestPractices  []string              `json:"best_practices"`
 }{
 	Overview: APIOverview{
-		Description: "The xatu library provides easy access to Ethereum network data through ClickHouse, Prometheus, and Loki via Grafana proxy. It is pre-installed in the sandbox environment. Use the datasources://list resource to discover available datasource UIDs.",
+		Description: "The xatu library provides easy access to Ethereum network data through ClickHouse, Prometheus, and Loki. It is pre-installed in the sandbox environment. Use the datasources://clickhouse resource to discover available cluster names.",
 		Import:      "from xatu import clickhouse, prometheus, loki, storage",
 	},
 	Modules: map[string]ModuleDoc{
 		"clickhouse": {
-			Description: "Query ClickHouse databases for Ethereum blockchain data via Grafana proxy",
+			Description: "Query ClickHouse databases for Ethereum blockchain data",
 			Functions: map[string]FunctionDoc{
 				"list_datasources": {
 					Signature:   "clickhouse.list_datasources() -> list[dict]",
-					Description: "List available ClickHouse datasources from Grafana",
-					Returns:     "List of datasource info dictionaries with uid, name, and type",
+					Description: "List available ClickHouse clusters (prefer using datasources://clickhouse resource instead)",
+					Returns:     "List of cluster info dictionaries with name, description, and database",
 					Example: `from xatu import clickhouse
 
-# List available ClickHouse datasources
-datasources = clickhouse.list_datasources()
-for ds in datasources:
-    print(f"{ds['name']}: {ds['uid']}")`,
+# List available ClickHouse clusters
+clusters = clickhouse.list_datasources()
+for c in clusters:
+    print(f"{c['name']}: {c['description']}")`,
 				},
 				"query": {
-					Signature:   "clickhouse.query(datasource_uid: str, sql: str) -> pandas.DataFrame",
-					Description: "Execute a SQL query via Grafana proxy and return results as a pandas DataFrame",
+					Signature:   "clickhouse.query(cluster_name: str, sql: str) -> pandas.DataFrame",
+					Description: "Execute a SQL query and return results as a pandas DataFrame",
 					Parameters: map[string]string{
-						"datasource_uid": "The Grafana datasource UID for the ClickHouse instance (use list_datasources() or datasources://list to find UIDs)",
-						"sql":            "The SQL query to execute",
+						"cluster_name": "The cluster name: 'xatu' (raw events) or 'xatu-cbt' (pre-aggregated). See datasources://clickhouse for details.",
+						"sql":          "The SQL query to execute",
 					},
 					Returns: "pandas.DataFrame with query results",
 					Example: `from xatu import clickhouse
 
-# First, find the datasource UID (or use datasources://list resource)
-datasources = clickhouse.list_datasources()
-uid = datasources[0]['uid']  # e.g., "PDF61E9E97939C7ED"
-
-# Query recent blocks
-df = clickhouse.query(uid, '''
-    SELECT slot, block_root, proposer_index
-    FROM beacon_api_eth_v1_events_block
-    WHERE meta_network_name = 'mainnet'
-    ORDER BY slot DESC
+# Query pre-aggregated data from xatu-cbt cluster
+# Note: xatu-cbt uses database prefix (mainnet.) instead of WHERE filter
+df = clickhouse.query('xatu-cbt', '''
+    SELECT slot, MIN(seen_slot_start_diff) as first_seen_ms
+    FROM mainnet.fct_block_first_seen_by_node
+    WHERE slot_start_date_time >= now() - INTERVAL 1 HOUR
+    GROUP BY slot
     LIMIT 100
 ''')
 
-print(df.head())`,
+# Query raw events from xatu cluster
+# Note: xatu uses WHERE meta_network_name filter
+df = clickhouse.query('xatu', '''
+    SELECT slot, block_root
+    FROM beacon_api_eth_v1_events_block
+    WHERE meta_network_name = 'mainnet'
+      AND slot_start_date_time >= now() - INTERVAL 1 HOUR
+    LIMIT 100
+''')`,
 				},
 				"query_raw": {
-					Signature:   "clickhouse.query_raw(datasource_uid: str, sql: str) -> tuple[list[tuple], list[str]]",
+					Signature:   "clickhouse.query_raw(cluster_name: str, sql: str) -> tuple[list[tuple], list[str]]",
 					Description: "Execute a SQL query and return raw results as (rows, column_names)",
 					Parameters: map[string]string{
-						"datasource_uid": "The Grafana datasource UID for the ClickHouse instance",
-						"sql":            "The SQL query to execute",
+						"cluster_name": "The cluster name: 'xatu' or 'xatu-cbt'",
+						"sql":          "The SQL query to execute",
 					},
 					Returns: "Tuple of (rows, column_names)",
 					Example: `from xatu import clickhouse
 
-rows, columns = clickhouse.query_raw("PDF61E9E97939C7ED", "SELECT slot, block_root FROM beacon_api_eth_v1_events_block LIMIT 10")
+rows, columns = clickhouse.query_raw('xatu-cbt', '''
+    SELECT slot, MIN(seen_slot_start_diff) as first_seen_ms
+    FROM mainnet.fct_block_first_seen_by_node
+    WHERE slot_start_date_time >= now() - INTERVAL 1 HOUR
+    GROUP BY slot
+    LIMIT 10
+''')
 print(f"Columns: {columns}")
 for row in rows:
     print(row)`,
@@ -106,46 +117,46 @@ for row in rows:
 			},
 		},
 		"prometheus": {
-			Description: "Query Prometheus metrics for monitoring data via Grafana proxy",
+			Description: "Query Prometheus metrics for monitoring data",
 			Functions: map[string]FunctionDoc{
 				"list_datasources": {
 					Signature:   "prometheus.list_datasources() -> list[dict]",
-					Description: "List available Prometheus datasources from Grafana",
-					Returns:     "List of datasource info dictionaries with uid, name, and type",
+					Description: "List available Prometheus datasources",
+					Returns:     "List of datasource info dictionaries with name, description, and url",
 				},
 				"query": {
-					Signature:   "prometheus.query(datasource_uid: str, promql: str, time: str | None = None) -> dict",
-					Description: "Execute an instant PromQL query via Grafana proxy",
+					Signature:   "prometheus.query(datasource_name: str, promql: str, time: str | None = None) -> dict",
+					Description: "Execute an instant PromQL query",
 					Parameters: map[string]string{
-						"datasource_uid": "The Grafana datasource UID for the Prometheus instance",
-						"promql":         "The PromQL query string",
-						"time":           "Optional timestamp (RFC3339, Unix timestamp, or 'now-1h' format). Default: now",
+						"datasource_name": "The Prometheus datasource name (see datasources://prometheus)",
+						"promql":          "The PromQL query string",
+						"time":            "Optional timestamp (RFC3339, Unix timestamp, or 'now-1h' format). Default: now",
 					},
 					Returns: "Dictionary with 'resultType' and 'result' keys",
 					Example: `from xatu import prometheus
 
-# Query current value using datasource UID
-result = prometheus.query("P4169E866C3094E38", "up")
+# Query using datasource name
+result = prometheus.query("prometheus-mainnet", "up")
 print(result)
 
 # Query with specific time
-result = prometheus.query("P4169E866C3094E38", "up", time="now-1h")`,
+result = prometheus.query("prometheus-mainnet", "up", time="now-1h")`,
 				},
 				"query_range": {
-					Signature:   "prometheus.query_range(datasource_uid: str, promql: str, start: str, end: str, step: str) -> dict",
-					Description: "Execute a range PromQL query via Grafana proxy",
+					Signature:   "prometheus.query_range(datasource_name: str, promql: str, start: str, end: str, step: str) -> dict",
+					Description: "Execute a range PromQL query",
 					Parameters: map[string]string{
-						"datasource_uid": "The Grafana datasource UID for the Prometheus instance",
-						"promql":         "The PromQL query string",
-						"start":          "Start time (RFC3339, Unix timestamp, or 'now-1h' format)",
-						"end":            "End time (RFC3339, Unix timestamp, or 'now' format)",
-						"step":           "Query resolution step (e.g., '1m', '5m', '1h')",
+						"datasource_name": "The Prometheus datasource name",
+						"promql":          "The PromQL query string",
+						"start":           "Start time (RFC3339, Unix timestamp, or 'now-1h' format)",
+						"end":             "End time (RFC3339, Unix timestamp, or 'now' format)",
+						"step":            "Query resolution step (e.g., '1m', '5m', '1h')",
 					},
 					Returns: "Dictionary with time series data",
 					Example: `from xatu import prometheus
 
 result = prometheus.query_range(
-    "P4169E866C3094E38",
+    "prometheus-mainnet",
     "rate(http_requests_total[5m])",
     start="now-1h",
     end="now",
@@ -153,81 +164,81 @@ result = prometheus.query_range(
 )`,
 				},
 				"get_labels": {
-					Signature:   "prometheus.get_labels(datasource_uid: str) -> list[str]",
+					Signature:   "prometheus.get_labels(datasource_name: str) -> list[str]",
 					Description: "Get all label names from a Prometheus datasource",
 					Parameters: map[string]string{
-						"datasource_uid": "The Grafana datasource UID",
+						"datasource_name": "The Prometheus datasource name",
 					},
 					Returns: "List of label names",
 				},
 				"get_label_values": {
-					Signature:   "prometheus.get_label_values(datasource_uid: str, label: str) -> list[str]",
+					Signature:   "prometheus.get_label_values(datasource_name: str, label: str) -> list[str]",
 					Description: "Get all values for a specific label",
 					Parameters: map[string]string{
-						"datasource_uid": "The Grafana datasource UID",
-						"label":          "Label name to get values for",
+						"datasource_name": "The Prometheus datasource name",
+						"label":           "Label name to get values for",
 					},
 					Returns: "List of label values",
 				},
 			},
 		},
 		"loki": {
-			Description: "Query Loki for log data via Grafana proxy",
+			Description: "Query Loki for log data",
 			Functions: map[string]FunctionDoc{
 				"list_datasources": {
 					Signature:   "loki.list_datasources() -> list[dict]",
-					Description: "List available Loki datasources from Grafana",
-					Returns:     "List of datasource info dictionaries with uid, name, and type",
+					Description: "List available Loki datasources",
+					Returns:     "List of datasource info dictionaries with name, description, and url",
 				},
 				"query": {
-					Signature:   "loki.query(datasource_uid: str, logql: str, limit: int = 100, start: str | None = None, end: str | None = None, direction: str = 'backward') -> list[dict]",
-					Description: "Execute a LogQL range query via Grafana proxy",
+					Signature:   "loki.query(datasource_name: str, logql: str, limit: int = 100, start: str | None = None, end: str | None = None, direction: str = 'backward') -> list[dict]",
+					Description: "Execute a LogQL range query",
 					Parameters: map[string]string{
-						"datasource_uid": "The Grafana datasource UID for the Loki instance",
-						"logql":          "The LogQL query string",
-						"limit":          "Maximum number of log entries to return (default: 100)",
-						"start":          "Start time (RFC3339, Unix timestamp, or 'now-1h' format). Default: now-1h",
-						"end":            "End time (RFC3339, Unix timestamp, or 'now' format). Default: now",
-						"direction":      "Sort direction: 'forward' (oldest first) or 'backward' (newest first)",
+						"datasource_name": "The Loki datasource name (see datasources://loki)",
+						"logql":           "The LogQL query string",
+						"limit":           "Maximum number of log entries to return (default: 100)",
+						"start":           "Start time (RFC3339, Unix timestamp, or 'now-1h' format). Default: now-1h",
+						"end":             "End time (RFC3339, Unix timestamp, or 'now' format). Default: now",
+						"direction":       "Sort direction: 'forward' (oldest first) or 'backward' (newest first)",
 					},
 					Returns: "List of log entries with 'timestamp', 'labels', and 'line' keys",
 					Example: `from xatu import loki
 
-# Query recent logs using datasource UID
-logs = loki.query("P8E80F9AEF21F6940", '{app="beacon-node"} |= "error"', limit=100)
+# Query recent logs using datasource name
+logs = loki.query("loki-mainnet", '{app="beacon-node"} |= "error"', limit=100)
 for log in logs:
     print(log['timestamp'], log['line'])`,
 				},
 				"query_instant": {
-					Signature:   "loki.query_instant(datasource_uid: str, logql: str, time: str | None = None, limit: int = 100, direction: str = 'backward') -> list[dict]",
-					Description: "Execute an instant LogQL query via Grafana proxy",
+					Signature:   "loki.query_instant(datasource_name: str, logql: str, time: str | None = None, limit: int = 100, direction: str = 'backward') -> list[dict]",
+					Description: "Execute an instant LogQL query",
 					Parameters: map[string]string{
-						"datasource_uid": "The Grafana datasource UID for the Loki instance",
-						"logql":          "The LogQL query string",
-						"time":           "Evaluation timestamp. Default: now",
-						"limit":          "Maximum number of log entries to return (default: 100)",
-						"direction":      "Sort direction: 'forward' or 'backward'",
+						"datasource_name": "The Loki datasource name",
+						"logql":           "The LogQL query string",
+						"time":            "Evaluation timestamp. Default: now",
+						"limit":           "Maximum number of log entries to return (default: 100)",
+						"direction":       "Sort direction: 'forward' or 'backward'",
 					},
 					Returns: "List of log entries with 'timestamp', 'labels', and 'line' keys",
 				},
 				"get_labels": {
-					Signature:   "loki.get_labels(datasource_uid: str, start: str | None = None, end: str | None = None) -> list[str]",
+					Signature:   "loki.get_labels(datasource_name: str, start: str | None = None, end: str | None = None) -> list[str]",
 					Description: "Get all label names from a Loki datasource",
 					Parameters: map[string]string{
-						"datasource_uid": "The Grafana datasource UID",
-						"start":          "Optional start time for label discovery",
-						"end":            "Optional end time for label discovery",
+						"datasource_name": "The Loki datasource name",
+						"start":           "Optional start time for label discovery",
+						"end":             "Optional end time for label discovery",
 					},
 					Returns: "List of label names",
 				},
 				"get_label_values": {
-					Signature:   "loki.get_label_values(datasource_uid: str, label: str, start: str | None = None, end: str | None = None) -> list[str]",
+					Signature:   "loki.get_label_values(datasource_name: str, label: str, start: str | None = None, end: str | None = None) -> list[str]",
 					Description: "Get all values for a specific label",
 					Parameters: map[string]string{
-						"datasource_uid": "The Grafana datasource UID",
-						"label":          "Label name to get values for",
-						"start":          "Optional start time",
-						"end":            "Optional end time",
+						"datasource_name": "The Loki datasource name",
+						"label":           "Label name to get values for",
+						"start":           "Optional start time",
+						"end":             "Optional end time",
 					},
 					Returns: "List of label values",
 				},
@@ -287,44 +298,38 @@ url = storage.upload('/workspace/data.csv', remote_name='analysis_results.csv')`
 import pandas as pd
 from xatu import clickhouse, storage
 
-# Use the ClickHouse datasource UID (from datasources://list or config)
-CLICKHOUSE_UID = "PDF61E9E97939C7ED"
-
-# Query block timing data
-df = clickhouse.query(CLICKHOUSE_UID, '''
+# Query block timing data from xatu-cbt cluster (pre-aggregated)
+df = clickhouse.query('xatu-cbt', '''
     SELECT
         toStartOfHour(slot_start_date_time) as hour,
-        avg(propagation_slot_start_diff) as avg_propagation_ms
-    FROM beacon_api_eth_v1_events_block
-    WHERE meta_network_name = 'mainnet'
-      AND slot_start_date_time >= now() - INTERVAL 24 HOUR
+        avg(seen_slot_start_diff) as avg_arrival_ms
+    FROM mainnet.fct_block_first_seen_by_node
+    WHERE slot_start_date_time >= now() - INTERVAL 24 HOUR
     GROUP BY hour
     ORDER BY hour
 ''')
 
 # Create visualization
 plt.figure(figsize=(12, 6))
-plt.plot(df['hour'], df['avg_propagation_ms'])
+plt.plot(df['hour'], df['avg_arrival_ms'])
 plt.xlabel('Time')
-plt.ylabel('Average Propagation (ms)')
-plt.title('Block Propagation Times - Last 24 Hours')
+plt.ylabel('Average Arrival Time (ms)')
+plt.title('Block Arrival Times - Last 24 Hours')
 plt.xticks(rotation=45)
 plt.tight_layout()
-plt.savefig('/workspace/propagation.png', dpi=150)
+plt.savefig('/workspace/block_timing.png', dpi=150)
 plt.close()
 
-url = storage.upload('/workspace/propagation.png')
+url = storage.upload('/workspace/block_timing.png')
 print(f"Chart: {url}")`,
 		},
 		"data_export": {
 			Description: "Exporting query results for further analysis",
 			Example: `from xatu import clickhouse, storage
 
-CLICKHOUSE_UID = "PDF61E9E97939C7ED"
-
-# Query data
-df = clickhouse.query(CLICKHOUSE_UID, '''
-    SELECT *
+# Query raw events from xatu cluster
+df = clickhouse.query('xatu', '''
+    SELECT slot, block_root, proposer_index, slot_start_date_time
     FROM beacon_api_eth_v1_events_block
     WHERE meta_network_name = 'mainnet'
       AND slot_start_date_time >= now() - INTERVAL 1 HOUR
@@ -336,30 +341,27 @@ df.to_parquet('/workspace/blocks_export.parquet')
 url = storage.upload('/workspace/blocks_export.parquet')
 print(f"Data export: {url}")`,
 		},
-		"multi_datasource_analysis": {
-			Description: "Comparing data across different ClickHouse datasources",
+		"multi_cluster_analysis": {
+			Description: "Comparing data across xatu and xatu-cbt clusters",
 			Example: `from xatu import clickhouse
 
-# Datasource UIDs (from datasources://list)
-XATU_UID = "PDF61E9E97939C7ED"      # Main Xatu cluster
-XATU_CBT_UID = "PDDA0A20013A2233F"  # CBT cluster
-
-# Query raw data from main Xatu cluster
-raw_df = clickhouse.query(XATU_UID, '''
+# Query raw events from xatu cluster
+raw_df = clickhouse.query('xatu', '''
     SELECT slot, count() as raw_count
     FROM beacon_api_eth_v1_events_block
     WHERE meta_network_name = 'mainnet'
-      AND slot >= 10000000
+      AND slot_start_date_time >= now() - INTERVAL 1 HOUR
     GROUP BY slot
     ORDER BY slot DESC
     LIMIT 100
 ''')
 
-# Query aggregated data from CBT cluster
-cbt_df = clickhouse.query(XATU_CBT_UID, '''
-    SELECT slot, block_seen_p50_ms
-    FROM mainnet.cbt_block_timing
-    WHERE slot >= 10000000
+# Query pre-aggregated data from xatu-cbt cluster
+cbt_df = clickhouse.query('xatu-cbt', '''
+    SELECT slot, MIN(seen_slot_start_diff) as first_seen_ms
+    FROM mainnet.fct_block_first_seen_by_node
+    WHERE slot_start_date_time >= now() - INTERVAL 1 HOUR
+    GROUP BY slot
     ORDER BY slot DESC
     LIMIT 100
 ''')
@@ -370,7 +372,7 @@ print(merged.head())`,
 		},
 	},
 	BestPractices: []string{
-		"Use datasources://list or clickhouse.list_datasources() to discover available datasource UIDs",
+		"Use datasources://clickhouse to discover available cluster names",
 		"Always use LIMIT clauses to avoid fetching too much data",
 		"Use time-based filters (slot_start_date_time) to limit query scope",
 		"Prefer aggregations over fetching raw data when possible",

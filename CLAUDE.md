@@ -96,7 +96,7 @@ Tools and resources use registries (`tool.Registry`, `resource.Registry`) that a
 
 ## Configuration
 
-Datasources connect directly (no Grafana proxy). Configuration requires:
+Configuration requires:
 - `clickhouse` - List of ClickHouse clusters with connection details
 - `prometheus` - List of Prometheus instances (optional)
 - `loki` - List of Loki instances (optional)

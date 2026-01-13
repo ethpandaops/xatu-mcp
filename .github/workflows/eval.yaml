@@ -80,9 +80,21 @@ jobs:
           auth:
             enabled: false
 
-          grafana:
-            url: "${{ secrets.GRAFANA_URL }}"
-            api_key: "${{ secrets.GRAFANA_API_KEY }}"
+          clickhouse:
+            - name: xatu
+              host: "${{ secrets.CLICKHOUSE_XATU_HOST }}"
+              port: 9440
+              database: default
+              username: "${{ secrets.CLICKHOUSE_XATU_USERNAME }}"
+              password: "${{ secrets.CLICKHOUSE_XATU_PASSWORD }}"
+              ssl: true
+            - name: xatu-cbt
+              host: "${{ secrets.CLICKHOUSE_CBT_HOST }}"
+              port: 9440
+              database: default
+              username: "${{ secrets.CLICKHOUSE_CBT_USERNAME }}"
+              password: "${{ secrets.CLICKHOUSE_CBT_PASSWORD }}"
+              ssl: true
 
           sandbox:
             image: "ghcr.io/ethpandaops/xatu-mcp-sandbox:latest"

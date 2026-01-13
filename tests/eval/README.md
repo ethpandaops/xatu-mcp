@@ -4,7 +4,7 @@ LLM evaluation framework for testing the xatu-mcp MCP server using **Claude Agen
 
 ## Overview
 
-This evaluation harness tests end-to-end task completion against the xatu-mcp MCP server with live Grafana data. It uses:
+This evaluation harness tests end-to-end task completion against the xatu-mcp MCP server with live ClickHouse data. It uses:
 
 - **[Claude Agent SDK (Python)](https://platform.claude.com/docs/en/agent-sdk/python)** - Same agent loop that powers Claude Code, native MCP support
 - **[DeepEval](https://github.com/confident-ai/deepeval)** - Rich agent-specific metrics, pytest integration

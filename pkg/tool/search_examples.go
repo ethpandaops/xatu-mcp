@@ -41,12 +41,12 @@ Examples:
 
 // SearchExampleResult represents a single matching example with category context.
 type SearchExampleResult struct {
-	CategoryKey  string `json:"category_key"`
-	CategoryName string `json:"category_name"`
-	ExampleName  string `json:"example_name"`
-	Description  string `json:"description"`
-	QueryPreview string `json:"query_preview"`
-	Cluster      string `json:"cluster"`
+	CategoryKey   string `json:"category_key"`
+	CategoryName  string `json:"category_name"`
+	ExampleName   string `json:"example_name"`
+	Description   string `json:"description"`
+	QueryPreview  string `json:"query_preview"`
+	TargetCluster string `json:"target_cluster"`
 }
 
 // SearchExamplesResponse is the complete search response.
@@ -248,12 +248,12 @@ func searchExamples(
 
 			if matches {
 				results = append(results, &SearchExampleResult{
-					CategoryKey:  categoryKey,
-					CategoryName: category.Name,
-					ExampleName:  example.Name,
-					Description:  example.Description,
-					QueryPreview: truncateQuery(example.Query, QueryPreviewMaxLines, QueryPreviewMaxLength),
-					Cluster:      example.Cluster,
+					CategoryKey:   categoryKey,
+					CategoryName:  category.Name,
+					ExampleName:   example.Name,
+					Description:   example.Description,
+					QueryPreview:  truncateQuery(example.Query, QueryPreviewMaxLines, QueryPreviewMaxLength),
+					TargetCluster: example.Cluster,
 				})
 
 				if len(results) >= limit {
