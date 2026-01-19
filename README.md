@@ -33,6 +33,21 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
+## Claude Code
+
+Add to `.mcp.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "xatu": {
+      "type": "sse",
+      "url": "http://localhost:2480/sse"
+    }
+  }
+}
+```
+
 ## Tools & Resources
 
 | Tool | Description |
