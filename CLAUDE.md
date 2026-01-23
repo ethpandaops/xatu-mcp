@@ -172,8 +172,8 @@ docker-compose down               # Stop all services
 ```
 
 **Services:**
-- `mcp-server` - The xatu-mcp server (ports 2480 for MCP, 2490 for metrics)
-- `minio` - S3-compatible storage for chart/file uploads (port 2400 API, 2401 console)
+- `mcp-server` - The xatu-mcp server (ports 2480 for MCP, 31490 for metrics)
+- `minio` - S3-compatible storage for chart/file uploads (port 31400 API, 31401 console)
 - `minio-init` - Creates the output bucket on startup
 - `sandbox-builder` - Builds the sandbox Docker image
 
@@ -200,12 +200,12 @@ uv run python -m scripts.langfuse down
 ```
 
 **Services:**
-- `langfuse-web` - Web UI (http://localhost:3000, login: admin@xatu.local / adminadmin)
+- `langfuse-web` - Web UI (http://localhost:31700, login: admin@xatu.local / adminadmin)
 - `langfuse-worker` - Background trace processing
 - `postgres` - Main database
 - `clickhouse` - Analytics database
 - `redis` - Cache
-- `minio` - Blob storage (separate from main stack, port 19090)
+- `minio` - Blob storage (separate from main stack, port 31909)
 
 **Pre-configured API keys** (no manual setup needed):
 - Public key: `pk-lf-xatu-eval-local`

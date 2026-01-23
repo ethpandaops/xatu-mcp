@@ -119,4 +119,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
 
 # Default command - start with SSE transport
 ENTRYPOINT ["xatu-mcp"]
-CMD ["serve", "--transport", "sse"]
+CMD ["serve", "--transport", "streamable-http"]

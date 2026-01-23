@@ -40,19 +40,20 @@ type Service interface {
 
 // service implements the Service interface.
 type service struct {
-	log              logrus.FieldLogger
-	cfg              config.ServerConfig
-	authCfg          config.AuthConfig
-	toolRegistry     tool.Registry
-	resourceRegistry resource.Registry
-	sandbox          sandbox.Service
-	auth             auth.SimpleService
-	mcpServer        *mcpserver.MCPServer
-	sseServer        *mcpserver.SSEServer
-	httpServer       *http.Server
-	mu               sync.Mutex
-	done             chan struct{}
-	running          bool
+	log                  logrus.FieldLogger
+	cfg                  config.ServerConfig
+	authCfg              config.AuthConfig
+	toolRegistry         tool.Registry
+	resourceRegistry     resource.Registry
+	sandbox              sandbox.Service
+	auth                 auth.SimpleService
+	mcpServer            *mcpserver.MCPServer
+	sseServer            *mcpserver.SSEServer
+	streamableHTTPServer *mcpserver.StreamableHTTPServer
+	httpServer           *http.Server
+	mu                   sync.Mutex
+	done                 chan struct{}
+	running              bool
 }
 
 // NewService creates a new MCP server service.
@@ -151,6 +152,12 @@ func (s *service) Stop() error {
 	if s.sseServer != nil {
 		if err := s.sseServer.Shutdown(shutdownCtx); err != nil {
 			s.log.WithError(err).Error("Failed to shutdown SSE server")
+		}
+	}
+
+	if s.streamableHTTPServer != nil {
+		if err := s.streamableHTTPServer.Shutdown(shutdownCtx); err != nil {
+			s.log.WithError(err).Error("Failed to shutdown Streamable HTTP server")
 		}
 	}
 
@@ -342,19 +349,12 @@ func (s *service) runStreamableHTTP(ctx context.Context) error {
 
 	s.log.WithField("address", addr).Info("Running MCP server with streamable-http transport")
 
-	// StreamableHTTP uses the same SSE server infrastructure with different settings.
-	opts := []mcpserver.SSEOption{
-		mcpserver.WithKeepAlive(true),
-	}
-
-	if s.cfg.BaseURL != "" {
-		opts = append(opts, mcpserver.WithBaseURL(s.cfg.BaseURL))
-	}
-
-	s.sseServer = mcpserver.NewSSEServer(s.mcpServer, opts...)
+	// Create StreamableHTTP server with proper implementation.
+	// Note: StreamableHTTP uses /mcp endpoint by default.
+	s.streamableHTTPServer = mcpserver.NewStreamableHTTPServer(s.mcpServer)
 
 	// Build HTTP handler with auth.
-	handler := s.buildHTTPHandler(s.sseServer)
+	handler := s.buildStreamableHTTPHandler(s.streamableHTTPServer)
 
 	s.httpServer = &http.Server{
 		Addr:              addr,
@@ -415,6 +415,37 @@ func (s *service) buildHTTPHandler(mcpHandler http.Handler) http.Handler {
 	r.Handle("/sse/*", mcpHandler)
 	r.Handle("/message", mcpHandler)
 	r.Handle("/message/*", mcpHandler)
+
+	return r
+}
+
+// buildStreamableHTTPHandler creates an HTTP handler for Streamable HTTP transport.
+func (s *service) buildStreamableHTTPHandler(mcpHandler http.Handler) http.Handler {
+	r := chi.NewRouter()
+
+	// Apply auth middleware if enabled.
+	if s.auth != nil && s.auth.Enabled() {
+		r.Use(s.auth.Middleware())
+	}
+
+	// Mount auth routes (discovery endpoints, OAuth flow).
+	if s.auth != nil {
+		s.auth.MountRoutes(r)
+	}
+
+	// Health endpoints.
+	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+	r.Get("/ready", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ready"))
+	})
+
+	// Mount Streamable HTTP MCP handler on /mcp (the standard endpoint).
+	r.Handle("/mcp", mcpHandler)
+	r.Handle("/mcp/*", mcpHandler)
 
 	return r
 }

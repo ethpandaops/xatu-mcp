@@ -43,6 +43,22 @@ clickhouse:
     secure: true
     timeout: 120
 
+  # Experimental cluster for devnet data
+  - name: "xatu-experimental"
+    description: |
+      Experimental Xatu ClickHouse cluster with devnet Ethereum event data.
+      Contains beacon chain events (blocks, attestations, blob sidecars, etc.)
+      and execution layer data for devnet networks only.
+      IMPORTANT: Always filter by the table's partition key AND meta_network_name.
+      Use clickhouse://tables/{table} to discover available tables and columns.
+    host: "${CLICKHOUSE_EXPERIMENTAL_HOST}"
+    database: "${CLICKHOUSE_EXPERIMENTAL_DATABASE}"
+    username: "${CLICKHOUSE_EXPERIMENTAL_USERNAME}"
+    password: "${CLICKHOUSE_EXPERIMENTAL_PASSWORD}"
+    protocol: http
+    secure: true
+    timeout: 120
+
 # Prometheus configuration
 # Direct connections to Prometheus/VictoriaMetrics instances.
 prometheus:
@@ -120,7 +136,7 @@ auth:
 # Observability configuration
 observability:
   metrics_enabled: true
-  metrics_port: 2490
+  metrics_port: 31490
 
   tracing_enabled: false
   # otlp_endpoint: "${OTLP_ENDPOINT}"
@@ -139,3 +155,5 @@ schema_discovery:
       cluster: "xatu"   # Logical cluster name for resources
     - name: "xatu-cbt"
       cluster: "xatu-cbt"
+    - name: "xatu-experimental"
+      cluster: "xatu-experimental"

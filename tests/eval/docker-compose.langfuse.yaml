@@ -1,6 +1,6 @@
 # Langfuse v3 self-hosted for xatu-mcp eval trace viewing
 # Start with: docker compose -f docker-compose.langfuse.yaml up -d
-# Access UI at: http://localhost:3000
+# Access UI at: http://localhost:31700
 
 services:
   langfuse-worker:
@@ -16,10 +16,10 @@ services:
       clickhouse:
         condition: service_healthy
     ports:
-      - "127.0.0.1:3030:3030"
+      - "127.0.0.1:31730:3030"
     environment: &langfuse-env
       DATABASE_URL: postgresql://langfuse:langfuse@postgres:5432/langfuse
-      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_URL: http://localhost:31700
       SALT: ${LANGFUSE_SALT:-xatu-mcp-eval-salt-change-me}
       ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
       TELEMETRY_ENABLED: "false"
@@ -42,7 +42,7 @@ services:
       LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
       LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: minio
       LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: miniosecret
-      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://localhost:19090
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://localhost:31909
       LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
       LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
       # Redis
@@ -56,7 +56,7 @@ services:
     restart: always
     depends_on: *langfuse-depends-on
     ports:
-      - "3000:3000"
+      - "31700:3000"
     environment:
       <<: *langfuse-env
       NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-xatu-mcp-eval-secret-change-me}
@@ -83,8 +83,8 @@ services:
       - langfuse_clickhouse_data:/var/lib/clickhouse
       - langfuse_clickhouse_logs:/var/log/clickhouse-server
     ports:
-      - "127.0.0.1:18123:8123"
-      - "127.0.0.1:19000:9000"
+      - "127.0.0.1:31812:8123"
+      - "127.0.0.1:31900:9000"
     healthcheck:
       test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
       interval: 5s
@@ -101,8 +101,8 @@ services:
       MINIO_ROOT_USER: minio
       MINIO_ROOT_PASSWORD: miniosecret
     ports:
-      - "127.0.0.1:19090:9000"
-      - "127.0.0.1:19091:9001"
+      - "127.0.0.1:31909:9000"
+      - "127.0.0.1:31910:9001"
     volumes:
       - langfuse_minio_data:/data
     healthcheck:
@@ -119,7 +119,7 @@ services:
       --requirepass langfuse-redis
       --maxmemory-policy noeviction
     ports:
-      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:31637:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "langfuse-redis", "ping"]
       interval: 3s
@@ -141,7 +141,7 @@ services:
       TZ: UTC
       PGTZ: UTC
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:31543:5432"
     volumes:
       - langfuse_postgres_data:/var/lib/postgresql/data
 
