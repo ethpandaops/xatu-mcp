@@ -95,6 +95,8 @@ sandbox:
   timeout: 60  # seconds
   memory_limit: "2g"
   cpu_limit: 1.0
+  # Network for sandbox containers. In stdio mode (outside docker-compose),
+  # the server auto-creates this network if it doesn't exist.
   network: "mcp-internal"
 
   # Sessions configuration (optional)

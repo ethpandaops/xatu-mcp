@@ -19,6 +19,19 @@ docker-compose up -d
 
 The server runs on port 2480 (SSE transport, configurable via `MCP_SERVER_PORT`) with MinIO on ports 2400/2401 (configurable via `MINIO_API_PORT`/`MINIO_CONSOLE_PORT`).
 
+## Claude Code
+
+Add to `~/.claude.json` under `mcpServers`:
+
+```json
+{
+  "xatu-mcp": {
+    "type": "http",
+    "url": "http://localhost:2480/mcp"
+  }
+}
+```
+
 ## Claude Desktop
 
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
@@ -26,8 +39,9 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "xatu": {
-      "url": "http://localhost:2480/sse"
+    "xatu-mcp": {
+      "type": "http",
+      "url": "http://localhost:2480/mcp"
     }
   }
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/ethpandaops/xatu-mcp/pkg/config"
@@ -125,6 +126,11 @@ func (b *DockerBackend) Start(ctx context.Context) error {
 	// Ensure the sandbox image is available.
 	if err := b.ensureImage(ctx); err != nil {
 		return fmt.Errorf("ensuring sandbox image: %w", err)
+	}
+
+	// Ensure the configured network exists (auto-creates for stdio mode).
+	if err := b.ensureNetwork(ctx); err != nil {
+		return fmt.Errorf("ensuring sandbox network: %w", err)
 	}
 
 	// Start session manager if enabled.
@@ -1077,6 +1083,51 @@ func (b *DockerBackend) ensureImage(ctx context.Context) error {
 	if _, err := io.Copy(io.Discard, reader); err != nil {
 		return fmt.Errorf("reading pull output: %w", err)
 	}
+
+	return nil
+}
+
+// ensureNetwork ensures the configured Docker network exists.
+// For user-defined networks, it checks if the network exists and creates it
+// if missing. This enables stdio mode (outside docker-compose) to work without
+// requiring manual network creation. Built-in network modes (host, none,
+// bridge, default) are skipped.
+func (b *DockerBackend) ensureNetwork(ctx context.Context) error {
+	networkMode := container.NetworkMode(b.cfg.Network)
+
+	// Skip for empty or built-in network modes.
+	if !networkMode.IsUserDefined() {
+		return nil
+	}
+
+	networkName := b.cfg.Network
+	log := b.log.WithField("network", networkName)
+
+	// Check if the network already exists.
+	_, err := b.client.NetworkInspect(ctx, networkName, network.InspectOptions{})
+	if err == nil {
+		log.Debug("Sandbox network exists")
+		return nil
+	}
+
+	if !errdefs.IsNotFound(err) {
+		return fmt.Errorf("inspecting network %q: %w", networkName, err)
+	}
+
+	// Network not found, create it.
+	log.Info("Creating sandbox network")
+
+	_, err = b.client.NetworkCreate(ctx, networkName, network.CreateOptions{
+		Driver: "bridge",
+		Labels: map[string]string{
+			LabelManaged: "true",
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("creating network %q: %w", networkName, err)
+	}
+
+	log.Info("Sandbox network created")
 
 	return nil
 }

@@ -127,12 +127,15 @@ services:
 networks:
   # External network - accessible from outside
   mcp-external:
+    name: mcp-external    # Prevent project-name prefix
     driver: bridge
 
-  # Internal network - for sandbox containers
+  # Network for sandbox containers to reach datasources and MinIO.
+  # Not marked internal so containers can resolve external DNS for
+  # ClickHouse, Prometheus, and Loki connections.
   mcp-internal:
+    name: mcp-internal    # Prevent project-name prefix
     driver: bridge
-    internal: true
 
 volumes:
   minio-data:

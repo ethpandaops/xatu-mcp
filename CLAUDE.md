@@ -183,7 +183,7 @@ docker-compose down               # Stop all services
 
 **Networks:**
 - `mcp-external` - Exposed to host (MCP server, MinIO)
-- `mcp-internal` - Internal only (sandbox containers communicate with MinIO)
+- `mcp-internal` - Sandbox containers reach MinIO and external datasources (ClickHouse, Prometheus, Loki). Not marked `internal` so containers can resolve external DNS. In stdio mode (outside docker-compose), the server auto-creates this network on startup.
 
 #### Langfuse Stack (`tests/eval/docker-compose.langfuse.yaml`)
 
