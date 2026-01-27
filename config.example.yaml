@@ -98,6 +98,7 @@ sandbox:
   # Network for sandbox containers. In stdio mode (outside docker-compose),
   # the server auto-creates this network if it doesn't exist.
   network: "mcp-internal"
+  # host_shared_path: "/tmp/xatu-mcp-sandbox"  # Docker-in-Docker: host-visible path for bind mounts
 
   # Sessions configuration (optional)
   # When enabled, sandbox containers persist between calls (enabled by default)
@@ -159,3 +160,10 @@ schema_discovery:
       cluster: "xatu-cbt"
     - name: "xatu-experimental"
       cluster: "xatu-experimental"
+
+# Semantic search configuration
+# Enables vector-similarity search over query examples.
+# semantic_search:
+#   enabled: true                  # Defaults to true if model_path exists on disk
+#   model_path: "/usr/share/xatu-mcp/MiniLM-L6-v2.Q8_0.gguf"  # GGUF embedding model
+#   gpu_layers: 0                  # Layers to offload to GPU (0 = CPU only)
