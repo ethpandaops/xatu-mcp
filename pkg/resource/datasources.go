@@ -83,7 +83,11 @@ func createDatasourcesHandler(pluginReg *plugin.Registry, filterType string) Rea
 
 		var filtered []types.DatasourceInfo
 		if filterType == "" {
-			filtered = allInfos
+			if allInfos == nil {
+				filtered = make([]types.DatasourceInfo, 0)
+			} else {
+				filtered = allInfos
+			}
 		} else {
 			filtered = make([]types.DatasourceInfo, 0, len(allInfos))
 			for _, info := range allInfos {
