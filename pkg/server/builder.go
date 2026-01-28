@@ -216,14 +216,13 @@ func (b *Builder) buildClickHouseSchema() resource.ClickHouseSchemaClient {
 // Returns nil if semantic search is disabled or model is not available.
 func (b *Builder) buildExampleIndex() (*resource.ExampleIndex, error) {
 	cfg := b.cfg.SemanticSearch
-	if !cfg.IsEnabled() {
-		b.log.Info("Semantic search is disabled")
-		return nil, nil
+	if cfg.ModelPath == "" {
+		return nil, fmt.Errorf("semantic_search.model_path is required")
 	}
 
 	// Check if model file exists
 	if _, err := os.Stat(cfg.ModelPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("embedding model not found at %s (run 'make download-model' to fetch it)", cfg.ModelPath)
+		return nil, fmt.Errorf("embedding model not found at %s (run 'make download-models' to fetch it)", cfg.ModelPath)
 	}
 
 	embedder, err := embedding.New(cfg.ModelPath, cfg.GPULayers)

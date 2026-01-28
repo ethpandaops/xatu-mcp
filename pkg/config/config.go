@@ -53,7 +53,7 @@ type ServerConfig struct {
 	Transport string `yaml:"transport"`
 }
 
-// ClickHouseConfig holds configuration for a ClickHouse cluster.
+// ClickHouseConfig holds configuration for a ClickHouse cluster (HTTP/HTTPS only).
 type ClickHouseConfig struct {
 	// Name is the logical identifier for this cluster (required).
 	Name string `yaml:"name" json:"name"`
@@ -81,15 +81,6 @@ type ClickHouseConfig struct {
 
 	// Timeout is the query timeout in seconds. Defaults to 120.
 	Timeout int `yaml:"timeout,omitempty" json:"timeout,omitempty"`
-
-	// Protocol specifies the connection protocol: "native" or "http". Defaults to "native".
-	// Use "http" for HTTPS connections through proxies like Cloudflare.
-	Protocol string `yaml:"protocol,omitempty" json:"protocol,omitempty"`
-}
-
-// IsHTTP returns whether HTTP protocol should be used.
-func (c *ClickHouseConfig) IsHTTP() bool {
-	return c.Protocol == "http"
 }
 
 // IsSecure returns whether TLS is enabled (defaults to true).
@@ -183,23 +174,11 @@ func (c *SchemaDiscoveryConfig) IsEnabled() bool {
 
 // SemanticSearchConfig holds configuration for semantic example search.
 type SemanticSearchConfig struct {
-	// Enabled controls whether semantic search is active. Defaults to true if model path exists.
-	Enabled *bool `yaml:"enabled,omitempty"`
-
-	// ModelPath is the path to the GGUF embedding model file.
+	// ModelPath is the path to the GGUF embedding model file (required).
 	ModelPath string `yaml:"model_path,omitempty"`
 
 	// GPULayers is the number of layers to offload to GPU (0 = CPU only).
 	GPULayers int `yaml:"gpu_layers,omitempty"`
-}
-
-// IsEnabled returns whether semantic search is enabled.
-// Defaults to true if a model path is configured.
-func (c *SemanticSearchConfig) IsEnabled() bool {
-	if c.Enabled != nil {
-		return *c.Enabled
-	}
-	return c.ModelPath != ""
 }
 
 // SandboxConfig holds sandbox execution configuration.
@@ -248,10 +227,8 @@ type StorageConfig struct {
 
 // ObservabilityConfig holds observability configuration.
 type ObservabilityConfig struct {
-	MetricsEnabled bool   `yaml:"metrics_enabled"`
-	MetricsPort    int    `yaml:"metrics_port"`
-	TracingEnabled bool   `yaml:"tracing_enabled"`
-	OTLPEndpoint   string `yaml:"otlp_endpoint,omitempty"`
+	MetricsEnabled bool `yaml:"metrics_enabled"`
+	MetricsPort    int  `yaml:"metrics_port"`
 }
 
 // envVarPattern matches ${VAR_NAME} patterns for environment variable substitution.
@@ -394,8 +371,24 @@ func applyDefaults(cfg *Config) {
 
 	// Semantic search defaults.
 	if cfg.SemanticSearch.ModelPath == "" {
-		cfg.SemanticSearch.ModelPath = "/usr/share/xatu-mcp/MiniLM-L6-v2.Q8_0.gguf"
+		// Prefer local dev path if present, otherwise fall back to container path.
+		localPath := "models/MiniLM-L6-v2.Q8_0.gguf"
+		containerPath := "/usr/share/xatu-mcp/MiniLM-L6-v2.Q8_0.gguf"
+
+		switch {
+		case fileExists(localPath):
+			cfg.SemanticSearch.ModelPath = localPath
+		case fileExists(containerPath):
+			cfg.SemanticSearch.ModelPath = containerPath
+		default:
+			cfg.SemanticSearch.ModelPath = localPath
+		}
 	}
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // MaxSandboxTimeout is the maximum allowed sandbox timeout in seconds.

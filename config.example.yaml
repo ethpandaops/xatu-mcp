@@ -8,7 +8,7 @@ server:
   base_url: "http://localhost:2480"
 
 # ClickHouse configuration
-# Direct connections to ClickHouse clusters for data queries.
+# Direct connections to ClickHouse clusters for data queries (HTTP/HTTPS only).
 clickhouse:
   # Main Xatu cluster - raw event data
   - name: "xatu"
@@ -22,7 +22,6 @@ clickhouse:
     database: "${CLICKHOUSE_XATU_DATABASE}"
     username: "${CLICKHOUSE_XATU_USERNAME}"
     password: "${CLICKHOUSE_XATU_PASSWORD}"
-    protocol: http  # "native" (default) or "http" for HTTPS connections via proxies
     secure: true  # Use TLS (default: true)
     skip_verify: false  # Skip TLS cert verification (default: false)
     timeout: 120  # Query timeout in seconds
@@ -39,7 +38,6 @@ clickhouse:
     database: "${CLICKHOUSE_CBT_DATABASE}"
     username: "${CLICKHOUSE_CBT_USERNAME}"
     password: "${CLICKHOUSE_CBT_PASSWORD}"
-    protocol: http
     secure: true
     timeout: 120
 
@@ -55,7 +53,6 @@ clickhouse:
     database: "${CLICKHOUSE_EXPERIMENTAL_DATABASE}"
     username: "${CLICKHOUSE_EXPERIMENTAL_USERNAME}"
     password: "${CLICKHOUSE_EXPERIMENTAL_PASSWORD}"
-    protocol: http
     secure: true
     timeout: 120
 
@@ -143,9 +140,6 @@ observability:
   metrics_enabled: true
   metrics_port: 31490
 
-  tracing_enabled: false
-  # otlp_endpoint: "${OTLP_ENDPOINT}"
-
 # ClickHouse schema discovery configuration
 # Discovers table schemas from configured ClickHouse clusters.
 # Each datasource must reference a name from the clickhouse config above.
@@ -163,9 +157,8 @@ schema_discovery:
     - name: "xatu-experimental"
       cluster: "xatu-experimental"
 
-# Semantic search configuration
-# Enables vector-similarity search over query examples.
+# Semantic search configuration (required).
+# Ensure the model file exists at the configured path.
 # semantic_search:
-#   enabled: true                  # Defaults to true if model_path exists on disk
-#   model_path: "/usr/share/xatu-mcp/MiniLM-L6-v2.Q8_0.gguf"  # GGUF embedding model
-#   gpu_layers: 0                  # Layers to offload to GPU (0 = CPU only)
+#   model_path: "models/MiniLM-L6-v2.Q8_0.gguf"  # Local dev default; in Docker image it's /usr/share/xatu-mcp/...
+#   gpu_layers: 0                               # Layers to offload to GPU (0 = CPU only)

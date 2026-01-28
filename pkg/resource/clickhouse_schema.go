@@ -223,13 +223,9 @@ func (c *clickhouseSchemaClient) createConnection(cfg config.ClickHouseConfig) (
 	// Parse host:port using net.SplitHostPort for IPv6 compatibility.
 	host, port, err := net.SplitHostPort(cfg.Host)
 	if err != nil {
-		// No port specified, use default based on protocol.
+		// No port specified, use default for HTTP.
 		host = cfg.Host
-		if cfg.IsHTTP() {
-			port = "443" // Default HTTPS port.
-		} else {
-			port = "9440" // Default native secure port.
-		}
+		port = "443" // Default HTTPS port.
 	}
 
 	addr := net.JoinHostPort(host, port)
@@ -247,11 +243,9 @@ func (c *clickhouseSchemaClient) createConnection(cfg config.ClickHouseConfig) (
 		DialTimeout: 30 * time.Second,
 	}
 
-	// Set protocol (HTTP or Native).
-	if cfg.IsHTTP() {
-		opts.Protocol = clickhouse.HTTP
-		c.log.WithField("host", host).Debug("Using HTTP protocol for ClickHouse connection")
-	}
+	// Use HTTP protocol (ClickHouse HTTP/HTTPS only).
+	opts.Protocol = clickhouse.HTTP
+	c.log.WithField("host", host).Debug("Using HTTP protocol for ClickHouse connection")
 
 	// Configure TLS.
 	if cfg.IsSecure() {

@@ -1,4 +1,4 @@
-// Package observability provides metrics and tracing capabilities for xatu-mcp.
+// Package observability provides metrics capabilities for xatu-mcp.
 package observability
 
 import (

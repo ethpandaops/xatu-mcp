@@ -24,7 +24,7 @@ services:
     restart: "no"
 
   mcp-server:
-    # NOTE: Semantic search requires x86_64. On ARM Macs, it will be disabled.
+    # NOTE: Semantic search requires x86_64. On ARM Macs, use emulation or the server will fail to start.
     # Uncomment below for x86 emulation (slower but enables semantic search):
     # platform: linux/amd64
     build:
