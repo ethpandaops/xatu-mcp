@@ -35,8 +35,8 @@ __version__ = "0.1.0"
 
 
 def __getattr__(name):
-    """Lazy import for plugin modules (clickhouse, prometheus, loki)."""
-    if name in ("clickhouse", "prometheus", "loki"):
+    """Lazy import for plugin modules (clickhouse, prometheus, loki, dora)."""
+    if name in ("clickhouse", "prometheus", "loki", "dora"):
         import importlib
 
         mod = importlib.import_module(f".{name}", __name__)

@@ -27,8 +27,9 @@ COPY sandbox/ethpandaops /opt/ethpandaops-pkg
 
 # Copy plugin Python modules into the package
 COPY plugins/clickhouse/python/clickhouse.py /opt/ethpandaops-pkg/ethpandaops/clickhouse.py
-COPY plugins/prometheus/python/prometheus.py /opt/ethpandaops-pkg/ethpandaops/prometheus.py
+COPY plugins/dora/python/dora.py /opt/ethpandaops-pkg/ethpandaops/dora.py
 COPY plugins/loki/python/loki.py /opt/ethpandaops-pkg/ethpandaops/loki.py
+COPY plugins/prometheus/python/prometheus.py /opt/ethpandaops-pkg/ethpandaops/prometheus.py
 
 RUN uv pip install --system --no-cache /opt/ethpandaops-pkg && rm -rf /opt/ethpandaops-pkg
 

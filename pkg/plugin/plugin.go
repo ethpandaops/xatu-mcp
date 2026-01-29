@@ -10,6 +10,24 @@ import (
 	"github.com/ethpandaops/mcp/pkg/types"
 )
 
+// CartographoorAware is an optional interface that plugins can implement
+// to receive the cartographoor client for network discovery.
+// The client parameter is passed as any to avoid circular imports;
+// plugins should type-assert to resource.CartographoorClient.
+type CartographoorAware interface {
+	SetCartographoorClient(client any)
+}
+
+// DefaultEnabled is an optional interface that plugins can implement
+// to indicate they should be initialized even without explicit config.
+// This is useful for plugins like dora that work with discovered data
+// and require no user configuration.
+type DefaultEnabled interface {
+	// DefaultEnabled returns true if the plugin should be initialized
+	// without explicit config in the config file.
+	DefaultEnabled() bool
+}
+
 // ResourceRegistry is the interface plugins use to register MCP resources.
 // This avoids a circular dependency between plugin and resource packages.
 // pkg/resource.Registry satisfies this interface.

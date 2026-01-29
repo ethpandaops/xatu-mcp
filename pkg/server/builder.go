@@ -18,6 +18,7 @@ import (
 	"github.com/ethpandaops/mcp/pkg/tool"
 
 	clickhouseplugin "github.com/ethpandaops/mcp/plugins/clickhouse"
+	doraplugin "github.com/ethpandaops/mcp/plugins/dora"
 	lokiplugin "github.com/ethpandaops/mcp/plugins/loki"
 	prometheusplugin "github.com/ethpandaops/mcp/plugins/prometheus"
 )
@@ -104,6 +105,9 @@ func (b *Builder) Build(ctx context.Context) (Service, error) {
 
 	b.log.Info("Cartographoor client started")
 
+	// Inject cartographoor client into plugins that need it.
+	b.injectCartographoorClient(pluginReg, cartographoorClient)
+
 	// Create auth service.
 	authSvc, err := b.buildAuth()
 	if err != nil {
@@ -170,10 +174,11 @@ func (b *Builder) buildPluginRegistry() (*plugin.Registry, error) {
 
 	// Register all compiled-in plugins.
 	reg.Add(clickhouseplugin.New())
-	reg.Add(prometheusplugin.New())
+	reg.Add(doraplugin.New())
 	reg.Add(lokiplugin.New())
+	reg.Add(prometheusplugin.New())
 
-	// Initialize plugins that have config.
+	// Initialize plugins that have config or are default-enabled.
 	for _, name := range reg.All() {
 		rawYAML, err := b.cfg.PluginConfigYAML(name)
 		if err != nil {
@@ -181,6 +186,17 @@ func (b *Builder) buildPluginRegistry() (*plugin.Registry, error) {
 		}
 
 		if rawYAML == nil {
+			// Check if plugin is default-enabled.
+			p := reg.Get(name)
+			if de, ok := p.(plugin.DefaultEnabled); ok && de.DefaultEnabled() {
+				// Initialize with empty config.
+				if err := reg.InitPlugin(name, nil); err != nil {
+					return nil, fmt.Errorf("initializing default-enabled plugin %q: %w", name, err)
+				}
+
+				continue
+			}
+
 			b.log.WithField("plugin", name).Debug("Plugin not configured, skipping")
 
 			continue
@@ -280,6 +296,19 @@ func (b *Builder) buildCartographoor() resource.CartographoorClient {
 		CacheTTL: resource.DefaultCacheTTL,
 		Timeout:  resource.DefaultHTTPTimeout,
 	})
+}
+
+// injectCartographoorClient passes the cartographoor client to plugins that need it.
+func (b *Builder) injectCartographoorClient(
+	pluginReg *plugin.Registry,
+	client resource.CartographoorClient,
+) {
+	for _, p := range pluginReg.Initialized() {
+		if aware, ok := p.(plugin.CartographoorAware); ok {
+			aware.SetCartographoorClient(client)
+			b.log.WithField("plugin", p.Name()).Debug("Injected cartographoor client into plugin")
+		}
+	}
 }
 
 // buildExampleIndex creates the semantic search index for examples.

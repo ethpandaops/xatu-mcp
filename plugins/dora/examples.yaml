@@ -1,0 +1,162 @@
+dora_network_health:
+  name: Network Health
+  description: Check Ethereum network status using Dora beacon chain explorer
+  examples:
+    - name: Get network overview
+      description: Get current network health and statistics from Dora
+      query: |
+        from ethpandaops import dora
+
+        # List available networks with Dora explorers
+        networks = dora.list_networks()
+        print(f"Available networks: {[n['name'] for n in networks]}")
+
+        # Get network overview for a specific network
+        network = "holesky"
+        overview = dora.get_network_overview(network)
+        print(f"Current epoch: {overview['current_epoch']}")
+        print(f"Current slot: {overview['current_slot']}")
+        print(f"Active validators: {overview['active_validator_count']}")
+
+    - name: Check network finality
+      description: Check if the network is finalizing properly
+      query: |
+        from ethpandaops import dora
+
+        overview = dora.get_network_overview("holesky")
+        finalized_epoch = overview.get("finalized_epoch", 0)
+        current_epoch = overview.get("current_epoch", 0)
+
+        epochs_behind = current_epoch - finalized_epoch
+        if epochs_behind <= 2:
+            print(f"Network is finalizing normally (finalized epoch: {finalized_epoch})")
+        else:
+            print(f"Warning: Network is {epochs_behind} epochs behind finality")
+
+dora_validator_queries:
+  name: Validator Queries
+  description: Look up validator information and generate explorer links
+  examples:
+    - name: Get validator details
+      description: Look up a validator by index and generate a Dora link
+      query: |
+        from ethpandaops import dora
+
+        # Look up validator by index
+        validator = dora.get_validator("holesky", "12345")
+        print(f"Validator 12345:")
+        print(f"  Status: {validator['status']}")
+        print(f"  Balance: {validator['balance']} gwei")
+        print(f"  Activation epoch: {validator.get('activation_epoch', 'N/A')}")
+
+        # Generate a link to view in Dora
+        link = dora.link_validator("holesky", "12345")
+        print(f"  View in Dora: {link}")
+
+    - name: Get validators by status
+      description: List validators filtered by status
+      query: |
+        from ethpandaops import dora
+
+        # Get active validators (limited)
+        validators = dora.get_validators("holesky", status="active", limit=10)
+        print(f"Sample of active validators:")
+        for v in validators[:5]:
+            print(f"  - Index {v['index']}: balance {v['balance']} gwei")
+
+dora_slot_epoch_queries:
+  name: Slot and Epoch Queries
+  description: Query slot and epoch information from Dora
+  examples:
+    - name: Get slot details
+      description: Get information about a specific slot
+      query: |
+        from ethpandaops import dora
+
+        # Get latest slot info from overview
+        overview = dora.get_network_overview("holesky")
+        current_slot = overview["current_slot"]
+
+        # Get details for a specific slot
+        slot_info = dora.get_slot("holesky", str(current_slot - 10))
+        print(f"Slot {slot_info['slot']}:")
+        print(f"  Proposer: {slot_info.get('proposer', 'N/A')}")
+        print(f"  Status: {slot_info.get('status', 'N/A')}")
+
+        # Generate link to view slot
+        print(f"  View in Dora: {dora.link_slot('holesky', str(current_slot - 10))}")
+
+    - name: Get epoch summary
+      description: Get summary information for an epoch
+      query: |
+        from ethpandaops import dora
+
+        overview = dora.get_network_overview("holesky")
+        current_epoch = overview["current_epoch"]
+
+        # Get epoch details (previous epoch for complete data)
+        epoch_info = dora.get_epoch("holesky", current_epoch - 1)
+        print(f"Epoch {current_epoch - 1}:")
+        print(f"  Participation rate: {epoch_info.get('validator_participation', 'N/A')}")
+        print(f"  Finalized: {epoch_info.get('finalized', False)}")
+
+        print(f"  View in Dora: {dora.link_epoch('holesky', current_epoch - 1)}")
+
+dora_deep_links:
+  name: Deep Links
+  description: Generate Dora explorer links for various entities
+  examples:
+    - name: Generate various explorer links
+      description: Create deep links to Dora for validators, slots, addresses
+      query: |
+        from ethpandaops import dora
+
+        # Validator link
+        print(f"Validator: {dora.link_validator('holesky', '12345')}")
+
+        # Slot link
+        print(f"Slot: {dora.link_slot('holesky', '1000000')}")
+
+        # Epoch link
+        print(f"Epoch: {dora.link_epoch('holesky', 250000)}")
+
+        # Address link (execution layer)
+        print(f"Address: {dora.link_address('holesky', '0x742d35Cc6634C0532925a3b844Bc9e7595f1c1')}")
+
+        # Block link (execution layer)
+        print(f"Block: {dora.link_block('holesky', '1000000')}")
+
+dora_combined_workflows:
+  name: Combined Workflows
+  description: Combine Dora with other data sources for comprehensive analysis
+  examples:
+    - name: Network health dashboard
+      description: Combine Dora network status with Xatu data
+      query: |
+        from ethpandaops import dora, clickhouse
+
+        # Get network status from Dora
+        network = "holesky"
+        overview = dora.get_network_overview(network)
+
+        print(f"=== {network.upper()} Network Status ===")
+        print(f"Current slot: {overview['current_slot']}")
+        print(f"Current epoch: {overview['current_epoch']}")
+        print(f"Active validators: {overview['active_validator_count']}")
+
+        # Get recent blocks from Xatu for deeper analysis
+        df = clickhouse.query("xatu", f'''
+            SELECT
+                slot,
+                block_root,
+                proposer_index
+            FROM beacon_api_eth_v1_events_block
+            WHERE meta_network_name = '{network}'
+            ORDER BY slot DESC
+            LIMIT 5
+        ''')
+
+        print(f"\nRecent blocks from Xatu:")
+        for _, row in df.iterrows():
+            link = dora.link_slot(network, str(row['slot']))
+            print(f"  Slot {row['slot']}: proposer {row['proposer_index']} - {link}")

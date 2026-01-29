@@ -91,6 +91,14 @@ func (r *Registry) All() []string {
 	return names
 }
 
+// Get returns a plugin by name, or nil if not found.
+func (r *Registry) Get(name string) Plugin {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return r.all[name]
+}
+
 // StartAll starts all initialized plugins.
 func (r *Registry) StartAll(ctx context.Context) error {
 	r.mu.RLock()

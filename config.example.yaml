@@ -90,6 +90,12 @@ plugins:
         skip_verify: false  # Skip TLS cert verification (default: false)
         timeout: 60  # Query timeout in seconds
 
+  # Dora configuration
+  # Dora beacon chain explorer is enabled by default with no configuration needed.
+  # Network URLs are discovered automatically from cartographoor.
+  # dora:
+  #   enabled: true  # Set to false to disable Dora integration
+
   # Loki configuration
   # Direct connections to Loki instances for log queries.
   loki:
