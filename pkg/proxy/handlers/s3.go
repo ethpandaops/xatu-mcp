@@ -1,7 +1,10 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -101,11 +104,23 @@ func (h *S3Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Create the proxied request.
 	ctx := r.Context()
 
-	var body io.Reader
+	var bodyBytes []byte
 
 	if r.Body != nil && r.Method != http.MethodGet && r.Method != http.MethodHead {
-		// Stream body directly to avoid buffering large uploads.
-		body = r.Body
+		// Buffer the body to ensure accurate Content-Length for AWS v4 signing.
+		// AWS SigV4 requires consistent Content-Length between signing and sending.
+		var err error
+
+		bodyBytes, err = io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("failed to read request body: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	var body io.Reader
+	if len(bodyBytes) > 0 {
+		body = bytes.NewReader(bodyBytes)
 	}
 
 	proxyReq, err := http.NewRequestWithContext(ctx, r.Method, targetURL, body)
@@ -114,8 +129,11 @@ func (h *S3Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Set ContentLength from actual body size for accurate AWS v4 signing.
+	proxyReq.ContentLength = int64(len(bodyBytes))
+
 	// Copy relevant headers from the original request.
-	for _, header := range []string{"Content-Type", "Content-Length", "Content-MD5"} {
+	for _, header := range []string{"Content-Type", "Content-MD5"} {
 		if v := r.Header.Get(header); v != "" {
 			proxyReq.Header.Set(header, v)
 		}
@@ -128,13 +146,13 @@ func (h *S3Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Calculate payload hash.
-	payloadHash := "UNSIGNED-PAYLOAD"
-	if body != nil {
-		// For PUT requests, we should compute the hash but for simplicity use UNSIGNED-PAYLOAD.
-		// S3-compatible services typically accept this.
-		payloadHash = "UNSIGNED-PAYLOAD"
-	}
+	// Calculate payload hash (SHA256 of body content).
+	hash := sha256.Sum256(bodyBytes)
+	payloadHash := hex.EncodeToString(hash[:])
+
+	// Set the X-Amz-Content-Sha256 header BEFORE signing.
+	// This header must be present for S3 signature validation.
+	proxyReq.Header.Set("X-Amz-Content-Sha256", payloadHash)
 
 	err = h.signer.SignHTTP(ctx, creds, proxyReq, payloadHash, "s3", h.cfg.Region, time.Now())
 	if err != nil {
