@@ -57,9 +57,9 @@ pkg/
 │   ├── registry.go  # Static and template resource handlers
 │   └── *.go         # Individual resource providers
 ├── sandbox/         # Sandboxed code execution
-│   ├── sandbox.go   # Service interface (Docker/gVisor backends)
+│   ├── sandbox.go   # Service interface (Docker/Kubernetes backends)
 │   ├── docker.go    # Docker container execution
-│   ├── gvisor.go    # gVisor-based execution (production)
+│   ├── kubernetes.go # Kubernetes pod execution (production)
 │   └── session.go   # Session management for persistent containers
 ├── auth/            # GitHub OAuth authentication
 ├── config/          # Configuration loading and validation
@@ -157,7 +157,7 @@ plugins:
 ```
 
 Platform config stays at top level:
-- `sandbox.backend` - `docker` (local) or `gvisor` (production)
+- `sandbox.backend` - `docker` (local) or `kubernetes` (production)
 - `storage` - S3-compatible storage for output files
 - `auth` - GitHub OAuth configuration
 

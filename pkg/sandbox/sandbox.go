@@ -101,8 +101,8 @@ type BackendType string
 const (
 	// BackendDocker uses standard Docker containers.
 	BackendDocker BackendType = "docker"
-	// BackendGVisor uses Docker with gVisor runtime for enhanced isolation.
-	BackendGVisor BackendType = "gvisor"
+	// BackendKubernetes uses Kubernetes pods for sandbox execution.
+	BackendKubernetes BackendType = "kubernetes"
 )
 
 // New creates a new sandbox service based on the configuration.
@@ -112,8 +112,8 @@ func New(cfg config.SandboxConfig, log logrus.FieldLogger) (Service, error) {
 	switch backendType {
 	case BackendDocker:
 		return NewDockerBackend(cfg, log)
-	case BackendGVisor:
-		return NewGVisorBackend(cfg, log)
+	case BackendKubernetes:
+		return NewKubernetesBackend(cfg, log)
 	default:
 		return nil, fmt.Errorf("unsupported sandbox backend: %s", cfg.Backend)
 	}
@@ -122,5 +122,5 @@ func New(cfg config.SandboxConfig, log logrus.FieldLogger) (Service, error) {
 // Compile-time interface compliance checks.
 var (
 	_ Service = (*DockerBackend)(nil)
-	_ Service = (*GVisorBackend)(nil)
+	_ Service = (*KubernetesBackend)(nil)
 )

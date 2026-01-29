@@ -28,7 +28,7 @@ type SecurityConfig struct {
 	CPUPeriod int64
 	// TmpfsSize is the size of the /tmp tmpfs mount.
 	TmpfsSize string
-	// Runtime specifies the container runtime (e.g., "" for default, "runsc" for gVisor).
+	// Runtime specifies the container runtime (e.g., "" for default).
 	Runtime string
 }
 
@@ -58,19 +58,6 @@ func DefaultSecurityConfig(memoryLimit string, cpuLimit float64) (*SecurityConfi
 	}, nil
 }
 
-// GVisorSecurityConfig returns security configuration for gVisor-based execution.
-// Returns an error if the memory limit cannot be parsed.
-func GVisorSecurityConfig(memoryLimit string, cpuLimit float64) (*SecurityConfig, error) {
-	cfg, err := DefaultSecurityConfig(memoryLimit, cpuLimit)
-	if err != nil {
-		return nil, err
-	}
-
-	cfg.Runtime = "runsc"
-
-	return cfg, nil
-}
-
 // ApplyToHostConfig applies security settings to a Docker HostConfig.
 func (s *SecurityConfig) ApplyToHostConfig(hostConfig *container.HostConfig) {
 	// Resource limits.
@@ -84,7 +71,7 @@ func (s *SecurityConfig) ApplyToHostConfig(hostConfig *container.HostConfig) {
 	hostConfig.SecurityOpt = s.SecurityOpts
 	hostConfig.CapDrop = s.DropCapabilities
 
-	// Runtime (for gVisor).
+	// Custom runtime (if specified).
 	if s.Runtime != "" {
 		hostConfig.Runtime = s.Runtime
 	}
