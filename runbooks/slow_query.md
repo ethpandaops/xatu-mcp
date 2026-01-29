@@ -88,7 +88,7 @@ GROUP BY meta_client_name
 SELECT
     meta_client_name,
     count(*) as block_count
-FROM canonical_beacon_block
+FROM mainnet.fct_block_first_seen_by_node
 WHERE slot_start_date_time >= now() - INTERVAL 24 HOUR
 GROUP BY meta_client_name
 ORDER BY block_count DESC
