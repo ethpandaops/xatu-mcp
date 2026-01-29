@@ -1,4 +1,4 @@
-"""Configuration module for xatu-mcp evaluation."""
+"""Configuration module for ethpandaops-mcp evaluation."""
 
 from config.evaluator import get_evaluator_model, get_evaluator_model_name
 from config.settings import (

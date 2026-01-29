@@ -1,6 +1,6 @@
 # Binaries
-/xatu-mcp
-xatu-mcp-linux-*
+/mcp
+mcp-linux-*
 *.exe
 
 # Go

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI runner for xatu-mcp evaluation."""
+"""CLI runner for ethpandaops-mcp evaluation."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ def print_header(
     console.print()
     console.print(
         Panel(
-            f"[bold]xatu-mcp Evaluation[/bold]\n\n"
+            f"[bold]ethpandaops-mcp Evaluation[/bold]\n\n"
             f"Agent Model: [cyan]{model}[/cyan]\n"
             f"Evaluator Model: [cyan]{evaluator_model}[/cyan]\n"
             f"Category: [cyan]{category or 'all'}[/cyan]\n"
@@ -70,11 +70,11 @@ def run_pytest(
     """
     # Set environment variables for the settings
     env = os.environ.copy()
-    env["XATU_EVAL_MODEL"] = model
-    env["XATU_EVAL_EVALUATOR_MODEL"] = evaluator_model
-    env["XATU_EVAL_VERBOSE"] = str(verbose).lower()
-    env["XATU_EVAL_TRACK_COSTS"] = str(track_costs).lower()
-    env["XATU_EVAL_SAVE_TRACES"] = str(save_traces).lower()
+    env["MCP_EVAL_MODEL"] = model
+    env["MCP_EVAL_EVALUATOR_MODEL"] = evaluator_model
+    env["MCP_EVAL_VERBOSE"] = str(verbose).lower()
+    env["MCP_EVAL_TRACK_COSTS"] = str(track_costs).lower()
+    env["MCP_EVAL_SAVE_TRACES"] = str(save_traces).lower()
 
     # Build pytest arguments
     pytest_args = ["pytest", "tests/"]
@@ -131,11 +131,11 @@ def run_deepeval(
     """
     # Set environment variables for the settings
     env = os.environ.copy()
-    env["XATU_EVAL_MODEL"] = model
-    env["XATU_EVAL_EVALUATOR_MODEL"] = evaluator_model
-    env["XATU_EVAL_VERBOSE"] = str(verbose).lower()
-    env["XATU_EVAL_TRACK_COSTS"] = str(track_costs).lower()
-    env["XATU_EVAL_SAVE_TRACES"] = str(save_traces).lower()
+    env["MCP_EVAL_MODEL"] = model
+    env["MCP_EVAL_EVALUATOR_MODEL"] = evaluator_model
+    env["MCP_EVAL_VERBOSE"] = str(verbose).lower()
+    env["MCP_EVAL_TRACK_COSTS"] = str(track_costs).lower()
+    env["MCP_EVAL_SAVE_TRACES"] = str(save_traces).lower()
 
     # Disable Confident AI sync unless explicitly requested
     if not confident:
@@ -234,7 +234,7 @@ def list_test_cases() -> None:
 def main() -> None:
     """Main entry point for CLI runner."""
     parser = argparse.ArgumentParser(
-        description="Run xatu-mcp LLM evaluation",
+        description="Run ethpandaops-mcp LLM evaluation",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -266,7 +266,7 @@ Examples:
   uv run python -m scripts.run_eval --evaluator-model anthropic/claude-3.5-sonnet
 
   # Or use the installed script
-  uv run xatu-eval --model claude-sonnet-4-5
+  uv run mcp-eval --model claude-sonnet-4-5
         """,
     )
 

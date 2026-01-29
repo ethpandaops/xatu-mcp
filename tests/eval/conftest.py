@@ -1,4 +1,4 @@
-"""pytest configuration and fixtures for xatu-mcp evaluation."""
+"""pytest configuration and fixtures for ethpandaops-mcp evaluation."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Generator
 
 import pytest
 
-from agent.wrapper import XatuAgent
+from agent.wrapper import MCPAgent
 from config.settings import EvalSettings
 
 if TYPE_CHECKING:
@@ -23,9 +23,9 @@ def eval_settings() -> EvalSettings:
 
 
 @pytest.fixture
-def agent(eval_settings: EvalSettings) -> XatuAgent:
+def agent(eval_settings: EvalSettings) -> MCPAgent:
     """Create a fresh agent instance for each test."""
-    return XatuAgent(eval_settings)
+    return MCPAgent(eval_settings)
 
 
 class CostTracker:

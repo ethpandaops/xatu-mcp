@@ -1,4 +1,4 @@
-"""Tests for multi-step sessions against xatu-mcp."""
+"""Tests for multi-step sessions against ethpandaops-mcp."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from conftest import CostTracker
 from metrics.visualization import VisualizationURLMetric
 
 if TYPE_CHECKING:
-    from agent.wrapper import XatuAgent
+    from agent.wrapper import MCPAgent
     from config.settings import EvalSettings
 
 
@@ -42,7 +42,7 @@ def _get_test_case(test_id: str):
 @pytest.mark.parametrize("test_id", _get_test_ids())
 async def test_multi_step_session(
     test_id: str,
-    agent: XatuAgent,
+    agent: MCPAgent,
     eval_settings: EvalSettings,
     cost_tracker: CostTracker,
 ) -> None:
@@ -50,7 +50,7 @@ async def test_multi_step_session(
 
     Args:
         test_id: ID of the test case to run.
-        agent: The XatuAgent instance.
+        agent: The MCPAgent instance.
         eval_settings: Evaluation settings.
         cost_tracker: Cost tracker for aggregating costs.
     """
@@ -170,7 +170,7 @@ async def test_multi_step_session(
 @pytest.mark.asyncio
 @pytest.mark.slow
 async def test_session_persistence(
-    agent: XatuAgent,
+    agent: MCPAgent,
     eval_settings: EvalSettings,
 ) -> None:
     """Test that session state persists across multiple turns."""

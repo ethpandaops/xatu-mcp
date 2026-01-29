@@ -1,4 +1,4 @@
-"""Tests for visualization generation against xatu-mcp."""
+"""Tests for visualization generation against ethpandaops-mcp."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from conftest import CostTracker, TraceRecorder
 from metrics.visualization import VisualizationURLMetric
 
 if TYPE_CHECKING:
-    from agent.wrapper import XatuAgent
+    from agent.wrapper import MCPAgent
     from config.settings import EvalSettings
 
 
@@ -41,7 +41,7 @@ def _get_test_case(test_id: str):
 @pytest.mark.parametrize("test_id", _get_test_ids())
 async def test_visualization(
     test_id: str,
-    agent: XatuAgent,
+    agent: MCPAgent,
     eval_settings: EvalSettings,
     cost_tracker: CostTracker,
     trace_recorder: TraceRecorder,
@@ -50,7 +50,7 @@ async def test_visualization(
 
     Args:
         test_id: ID of the test case to run.
-        agent: The XatuAgent instance.
+        agent: The MCPAgent instance.
         eval_settings: Evaluation settings.
         cost_tracker: Cost tracker for aggregating costs.
         trace_recorder: Trace recorder for saving detailed traces.
@@ -182,7 +182,7 @@ async def test_visualization(
 @pytest.mark.asyncio
 @pytest.mark.visualization
 async def test_chart_with_custom_styling(
-    agent: XatuAgent,
+    agent: MCPAgent,
     eval_settings: EvalSettings,
 ) -> None:
     """Test chart generation with custom styling options."""
@@ -215,7 +215,7 @@ async def test_chart_with_custom_styling(
 @pytest.mark.asyncio
 @pytest.mark.visualization
 async def test_multiple_charts_in_one_request(
-    agent: XatuAgent,
+    agent: MCPAgent,
     eval_settings: EvalSettings,
 ) -> None:
     """Test generating multiple charts in a single request."""

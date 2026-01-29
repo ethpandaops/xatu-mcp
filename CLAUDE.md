@@ -4,9 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-xatu-mcp is an MCP (Model Context Protocol) server that provides AI assistants with Ethereum network analytics capabilities. It enables agents to execute Python code in sandboxed containers with access to ClickHouse blockchain data, Prometheus metrics, Loki logs, and S3-compatible storage for outputs.
+ethpandaops/mcp is an MCP (Model Context Protocol) server that provides AI assistants with Ethereum network analytics capabilities. It enables agents to execute Python code in sandboxed containers with access to ClickHouse blockchain data, Prometheus metrics, Loki logs, and S3-compatible storage for outputs.
 
 Data queries connect directly to configured datasources (ClickHouse, Prometheus, Loki) without intermediate proxies.
+
+The server uses a **plugin architecture** where each datasource (ClickHouse, Prometheus, Loki) is a self-contained plugin that owns its config schema, validation, environment variables, Python module, examples, and optional MCP resources.
 
 ## Commands
 
@@ -28,8 +30,8 @@ make fmt                      # Format code
 # Run
 make run                      # Run with stdio transport
 make run-sse                  # Run with SSE transport on port 2480
-./xatu-mcp serve              # Start server (default: stdio)
-./xatu-mcp serve -t sse -p 2480  # Start with SSE transport
+./mcp serve                   # Start server (default: stdio)
+./mcp serve -t sse -p 2480   # Start with SSE transport
 
 # Evaluation tests (in tests/eval/)
 cd tests/eval && uv sync      # Install Python dependencies
@@ -41,15 +43,18 @@ uv run python -m scripts.repl      # Interactive REPL
 
 ```
 pkg/
+├── types/           # Shared types (DatasourceInfo, ExampleCategory, ModuleDoc)
+├── plugin/          # Plugin interface and registry
+│   ├── plugin.go    # Plugin interface contract
+│   └── registry.go  # Plugin lifecycle management
 ├── server/          # MCP server implementation
 │   ├── server.go    # Service interface, transport handlers (stdio/SSE/HTTP)
-│   └── builder.go   # Dependency injection and service wiring
+│   └── builder.go   # Dependency injection, plugin lifecycle, service wiring
 ├── tool/            # MCP tools (execute_python, search_examples)
 │   ├── registry.go  # Tool registration interface
 │   └── execute_python.go  # Main tool for Python sandbox execution
-├── resource/        # MCP resources (datasources, networks, schemas)
+├── resource/        # MCP resources (datasources, networks, examples, API docs)
 │   ├── registry.go  # Static and template resource handlers
-│   ├── clickhouse_schema.go  # Direct ClickHouse schema discovery
 │   └── *.go         # Individual resource providers
 ├── sandbox/         # Sandboxed code execution
 │   ├── sandbox.go   # Service interface (Docker/gVisor backends)
@@ -58,12 +63,43 @@ pkg/
 │   └── session.go   # Session management for persistent containers
 ├── auth/            # GitHub OAuth authentication
 ├── config/          # Configuration loading and validation
+├── embedding/       # GGUF embedding model for semantic search
 └── observability/   # Prometheus metrics
+
+plugins/
+├── clickhouse/      # ClickHouse datasource plugin
+│   ├── plugin.go    # Plugin implementation
+│   ├── config.go    # Cluster and schema discovery config
+│   ├── schema.go    # ClickHouse schema discovery client
+│   ├── resources.go # clickhouse://tables MCP resources
+│   ├── examples.go  # Embedded query examples
+│   ├── examples.yaml
+│   └── python/
+│       └── clickhouse.py  # Python module for sandbox
+├── prometheus/      # Prometheus datasource plugin
+│   ├── plugin.go
+│   ├── config.go
+│   ├── examples.go
+│   ├── examples.yaml
+│   └── python/
+│       └── prometheus.py
+└── loki/            # Loki datasource plugin
+    ├── plugin.go
+    ├── config.go
+    ├── examples.go
+    ├── examples.yaml
+    └── python/
+        └── loki.py
 
 sandbox/             # Sandbox Docker image
 ├── Dockerfile       # Python 3.11 slim with data analysis libraries
-└── xatu/            # Python xatu library installed in sandbox
-    └── xatu/        # Modules: clickhouse, prometheus, loki, storage
+├── requirements.txt # Shared pip dependencies
+└── ethpandaops/     # Platform Python package
+    ├── pyproject.toml
+    └── ethpandaops/
+        ├── __init__.py   # Lazy imports for plugin modules
+        ├── _time.py      # Shared time utilities
+        └── storage.py    # S3 storage module
 
 tests/eval/          # LLM evaluation harness
 ├── agent/           # Claude Agent SDK wrapper
@@ -74,34 +110,56 @@ tests/eval/          # LLM evaluation harness
 
 ## Key Patterns
 
+### Plugin Architecture
+Each datasource is a self-contained plugin implementing `plugin.Plugin`:
+- **Config**: Own YAML schema, defaults, and validation
+- **Env vars**: Builds environment variables for sandbox containers
+- **Resources**: Registers custom MCP resources (e.g., `clickhouse://tables`)
+- **Examples**: Embedded query examples for semantic search
+- **API docs**: Python module documentation
+- **Lifecycle**: `Start()` for async init (schema discovery), `Stop()` for cleanup
+
+Plugins are registered in `pkg/server/builder.go` and initialized from the `plugins:` config section.
+
 ### Builder Pattern
 `pkg/server/builder.go` wires all dependencies. Services are created and started in order:
-1. Sandbox service
-2. Cartographoor client (network discovery)
-3. ClickHouse schema client (optional, direct connections)
+1. Plugin registry (init, validate, start all plugins)
+2. Sandbox service
+3. Cartographoor client (network discovery)
 4. Auth service
-5. Tool and resource registries
-6. MCP server
+5. Example index (semantic search)
+6. Tool and resource registries
+7. MCP server
 
 ### Registry Pattern
 Tools and resources use registries (`tool.Registry`, `resource.Registry`) that allow registration of handlers and definitions. The server iterates over registries to register with the MCP server.
 
 ### Sandbox Execution Flow
 1. `execute_python` tool receives code
-2. Builds environment variables from config (datasource configs as JSON, S3 credentials)
+2. Builds environment variables from plugin registry (each plugin provides its own env vars) plus platform S3 vars
 3. Calls `sandbox.Service.Execute()` which creates/reuses a Docker container
-4. Container runs Python with the `xatu` library pre-installed
+4. Container runs Python with the `ethpandaops` library pre-installed
 5. Python code connects directly to ClickHouse/Prometheus/Loki using credentials from env
 6. Output, files, and session info returned to caller
 
 ## Configuration
 
-Configuration requires:
-- `clickhouse` - List of ClickHouse clusters with connection details
-- `prometheus` - List of Prometheus instances (optional)
-- `loki` - List of Loki instances (optional)
+Configuration uses `plugins:` key for datasources:
+```yaml
+plugins:
+  clickhouse:
+    clusters: [...]
+    schema_discovery: { ... }
+  prometheus:
+    instances: [...]
+  loki:
+    instances: [...]
+```
+
+Platform config stays at top level:
 - `sandbox.backend` - `docker` (local) or `gvisor` (production)
 - `storage` - S3-compatible storage for output files
+- `auth` - GitHub OAuth configuration
 
 Environment variables are substituted using `${VAR_NAME}` syntax in YAML.
 
@@ -129,8 +187,9 @@ Key resources exposed by the server:
 - `networks://{name}` - Specific network details
 - `clickhouse://tables` - List all tables (if schema discovery enabled)
 - `clickhouse://tables/{table}` - Table schema details
-- `python://xatu` - Python library function signatures
+- `python://ethpandaops` - Python library function signatures
 - `examples://queries` - Common query patterns
+- `mcp://getting-started` - Getting started guide
 
 ## Local Development
 
@@ -172,7 +231,7 @@ docker-compose down               # Stop all services
 ```
 
 **Services:**
-- `mcp-server` - The xatu-mcp server (ports 2480 for MCP, 31490 for metrics)
+- `mcp-server` - The MCP server (ports 2480 for MCP, 31490 for metrics)
 - `minio` - S3-compatible storage for chart/file uploads (port 31400 API, 31401 console)
 - `minio-init` - Creates the output bucket on startup
 - `sandbox-builder` - Builds the sandbox Docker image
@@ -200,7 +259,7 @@ uv run python -m scripts.langfuse down
 ```
 
 **Services:**
-- `langfuse-web` - Web UI (http://localhost:31700, login: admin@xatu.local / adminadmin)
+- `langfuse-web` - Web UI (http://localhost:31700, login: admin@mcp.local / adminadmin)
 - `langfuse-worker` - Background trace processing
 - `postgres` - Main database
 - `clickhouse` - Analytics database
@@ -208,12 +267,12 @@ uv run python -m scripts.langfuse down
 - `minio` - Blob storage (separate from main stack, port 31909)
 
 **Pre-configured API keys** (no manual setup needed):
-- Public key: `pk-lf-xatu-eval-local`
-- Secret key: `sk-lf-xatu-eval-local`
-- Username: `admin@xatu.local`
+- Public key: `pk-lf-mcp-eval-local`
+- Secret key: `sk-lf-mcp-eval-local`
+- Username: `admin@mcp.local`
 - Password: `adminadmin`
 
 To enable tracing to LANGFUSE, set in your environment:
 ```bash
-export XATU_EVAL_LANGFUSE_ENABLED=true
+export MCP_EVAL_LANGFUSE_ENABLED=true
 ```

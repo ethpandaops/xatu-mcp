@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Interactive REPL for ad-hoc testing of xatu-mcp."""
+"""Interactive REPL for ad-hoc testing of ethpandaops-mcp."""
 
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ def print_welcome(model: str, mcp_url: str) -> None:
     console.print()
     console.print(
         Panel(
-            f"[bold]xatu-mcp REPL[/bold]\n\n"
+            f"[bold]ethpandaops-mcp REPL[/bold]\n\n"
             f"Model: [cyan]{model}[/cyan]\n"
             f"Server: [cyan]{mcp_url}[/cyan]\n\n"
             f"Commands:\n"
@@ -95,30 +95,30 @@ def print_help() -> None:
 async def repl_loop(
     model: str,
     verbose: bool,
-    xatu_mcp_url: str,
+    mcp_url: str,
 ) -> None:
     """Main REPL loop.
 
     Args:
         model: Claude model to use.
         verbose: Whether to show verbose output.
-        xatu_mcp_url: URL of the xatu-mcp server.
+        mcp_url: URL of the ethpandaops-mcp server.
     """
     # Import here to avoid circular imports and allow settings override
-    from agent.wrapper import ExecutionResult, XatuAgent
+    from agent.wrapper import ExecutionResult, MCPAgent
     from config.settings import EvalSettings
 
     settings = EvalSettings(
         model=model,  # type: ignore[arg-type]
         verbose=verbose,
-        xatu_mcp_url=xatu_mcp_url,
+        mcp_url=mcp_url,
     )
 
-    agent = XatuAgent(settings)
+    agent = MCPAgent(settings)
     session_id: str | None = None
     conversation_history: list[ExecutionResult] = []
 
-    print_welcome(model, xatu_mcp_url)
+    print_welcome(model, mcp_url)
 
     while True:
         try:
@@ -252,14 +252,14 @@ async def repl_loop(
 def main() -> None:
     """Main entry point for REPL."""
     parser = argparse.ArgumentParser(
-        description="Interactive REPL for xatu-mcp evaluation",
+        description="Interactive REPL for ethpandaops-mcp evaluation",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   uv run python -m scripts.repl
   uv run python -m scripts.repl --model claude-haiku-4-5
   uv run python -m scripts.repl --verbose --url http://localhost:2480
-  uv run xatu-repl --verbose
+  uv run mcp-repl --verbose
         """,
     )
     parser.add_argument(
@@ -277,7 +277,7 @@ Examples:
     parser.add_argument(
         "--url",
         default="http://localhost:2480",
-        help="xatu-mcp server URL (default: http://localhost:2480)",
+        help="ethpandaops-mcp server URL (default: http://localhost:2480)",
     )
     args = parser.parse_args()
 

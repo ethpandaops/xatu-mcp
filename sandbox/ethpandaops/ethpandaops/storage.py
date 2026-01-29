@@ -4,7 +4,7 @@ This module provides functions to upload files to S3-compatible storage
 and get public URLs for sharing.
 
 Example:
-    from xatu import storage
+    from ethpandaops import storage
 
     # Upload a file
     url = storage.upload("/workspace/chart.png")
@@ -20,19 +20,19 @@ from pathlib import Path
 import boto3
 from botocore.config import Config
 
-_S3_ENDPOINT = os.environ.get("XATU_S3_ENDPOINT", "")
-_S3_ACCESS_KEY = os.environ.get("XATU_S3_ACCESS_KEY", "")
-_S3_SECRET_KEY = os.environ.get("XATU_S3_SECRET_KEY", "")
-_S3_BUCKET = os.environ.get("XATU_S3_BUCKET", "xatu-mcp-outputs")
-_S3_REGION = os.environ.get("XATU_S3_REGION", "us-east-1")
-_S3_PUBLIC_URL_PREFIX = os.environ.get("XATU_S3_PUBLIC_URL_PREFIX", "")
+_S3_ENDPOINT = os.environ.get("ETHPANDAOPS_S3_ENDPOINT", "")
+_S3_ACCESS_KEY = os.environ.get("ETHPANDAOPS_S3_ACCESS_KEY", "")
+_S3_SECRET_KEY = os.environ.get("ETHPANDAOPS_S3_SECRET_KEY", "")
+_S3_BUCKET = os.environ.get("ETHPANDAOPS_S3_BUCKET", "mcp-outputs")
+_S3_REGION = os.environ.get("ETHPANDAOPS_S3_REGION", "us-east-1")
+_S3_PUBLIC_URL_PREFIX = os.environ.get("ETHPANDAOPS_S3_PUBLIC_URL_PREFIX", "")
 
 
 def _get_client():
     """Get or create S3 client."""
     if not _S3_ENDPOINT:
         raise ValueError(
-            "S3 storage not configured. Set XATU_S3_ENDPOINT environment variable."
+            "S3 storage not configured. Set ETHPANDAOPS_S3_ENDPOINT environment variable."
         )
 
     return boto3.client(
@@ -72,10 +72,10 @@ def upload(local_path: str, remote_name: str | None = None) -> str:
         remote_name = path.name
 
     # Generate a unique key using execution context (set by sandbox)
-    execution_id = os.environ.get("XATU_EXECUTION_ID")
+    execution_id = os.environ.get("ETHPANDAOPS_EXECUTION_ID")
     if not execution_id:
         raise ValueError(
-            "XATU_EXECUTION_ID environment variable is required for uploads. "
+            "ETHPANDAOPS_EXECUTION_ID environment variable is required for uploads. "
             "This should be set automatically by the sandbox."
         )
     key = f"{execution_id}/{remote_name}"

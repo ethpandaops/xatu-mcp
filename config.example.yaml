@@ -1,4 +1,4 @@
-# Xatu MCP Server Configuration
+# ethpandaops MCP Server Configuration
 # Copy this file to config.yaml and customize for your environment.
 # Environment variables can be substituted using ${VAR_NAME} syntax.
 
@@ -7,98 +7,116 @@ server:
   port: 2480
   base_url: "http://localhost:2480"
 
-# ClickHouse configuration
-# Direct connections to ClickHouse clusters for data queries.
-clickhouse:
-  # Main Xatu cluster - raw event data
-  - name: "xatu"
-    description: |
-      Main Xatu ClickHouse cluster with raw Ethereum event data.
-      Contains beacon chain events (blocks, attestations, blob sidecars, etc.)
-      and execution layer data across mainnet, sepolia, hoodi networks.
-      IMPORTANT: Always filter by the table's partition key AND meta_network_name.
-      Use clickhouse://tables/{table} to discover available tables and columns.
-    host: "${CLICKHOUSE_XATU_HOST}"  # e.g., clickhouse.example.com or clickhouse.example.com:8443
-    database: "${CLICKHOUSE_XATU_DATABASE}"
-    username: "${CLICKHOUSE_XATU_USERNAME}"
-    password: "${CLICKHOUSE_XATU_PASSWORD}"
-    protocol: http  # "native" (default) or "http" for HTTPS connections via proxies
-    secure: true  # Use TLS (default: true)
-    skip_verify: false  # Skip TLS cert verification (default: false)
-    timeout: 120  # Query timeout in seconds
+# Plugin configuration
+# Each key maps to a compiled-in plugin. Plugins without config are skipped.
+plugins:
+  # ClickHouse configuration
+  # Direct connections to ClickHouse clusters for data queries (HTTP/HTTPS only).
+  clickhouse:
+    clusters:
+      # Main Xatu cluster - raw event data
+      - name: "xatu"
+        description: |
+          Main Xatu ClickHouse cluster with raw Ethereum event data.
+          Contains beacon chain events (blocks, attestations, blob sidecars, etc.)
+          and execution layer data across mainnet, sepolia, hoodi networks.
+          IMPORTANT: Always filter by the table's partition key AND meta_network_name.
+          Use clickhouse://tables/{table} to discover available tables and columns.
+        host: "${CLICKHOUSE_XATU_HOST}"  # e.g., clickhouse.example.com or clickhouse.example.com:8443
+        database: "${CLICKHOUSE_XATU_DATABASE}"
+        username: "${CLICKHOUSE_XATU_USERNAME}"
+        password: "${CLICKHOUSE_XATU_PASSWORD}"
+        secure: true  # Use TLS (default: true)
+        skip_verify: false  # Skip TLS cert verification (default: false)
+        timeout: 120  # Query timeout in seconds
 
-  # Pre-aggregated CBT data
-  - name: "xatu-cbt"
-    description: |
-      Xatu CBT (ClickHouse Build Tool) cluster with pre-aggregated data built on top of the raw event data in the xatu cluster.
-      Contains block timing analysis, attestation accuracy by entity, and
-      validator performance metrics. Faster queries than raw data.
-      IMPORTANT: Always filter by the table's partition key.
-      Use clickhouse://tables/{table} to discover available tables.
-    host: "${CLICKHOUSE_CBT_HOST}"
-    database: "${CLICKHOUSE_CBT_DATABASE}"
-    username: "${CLICKHOUSE_CBT_USERNAME}"
-    password: "${CLICKHOUSE_CBT_PASSWORD}"
-    protocol: http
-    secure: true
-    timeout: 120
+      # Pre-aggregated CBT data
+      - name: "xatu-cbt"
+        description: |
+          Xatu CBT (ClickHouse Build Tool) cluster with pre-aggregated data built on top of the raw event data in the xatu cluster.
+          Contains block timing analysis, attestation accuracy by entity, and
+          validator performance metrics. Faster queries than raw data.
+          IMPORTANT: Always filter by the table's partition key.
+          Use clickhouse://tables/{table} to discover available tables.
+        host: "${CLICKHOUSE_CBT_HOST}"
+        database: "${CLICKHOUSE_CBT_DATABASE}"
+        username: "${CLICKHOUSE_CBT_USERNAME}"
+        password: "${CLICKHOUSE_CBT_PASSWORD}"
+        secure: true
+        timeout: 120
 
-  # Experimental cluster for devnet data
-  - name: "xatu-experimental"
-    description: |
-      Experimental Xatu ClickHouse cluster with devnet Ethereum event data.
-      Contains beacon chain events (blocks, attestations, blob sidecars, etc.)
-      and execution layer data for devnet networks only.
-      IMPORTANT: Always filter by the table's partition key AND meta_network_name.
-      Use clickhouse://tables/{table} to discover available tables and columns.
-    host: "${CLICKHOUSE_EXPERIMENTAL_HOST}"
-    database: "${CLICKHOUSE_EXPERIMENTAL_DATABASE}"
-    username: "${CLICKHOUSE_EXPERIMENTAL_USERNAME}"
-    password: "${CLICKHOUSE_EXPERIMENTAL_PASSWORD}"
-    protocol: http
-    secure: true
-    timeout: 120
+      # Experimental cluster for devnet data
+      - name: "xatu-experimental"
+        description: |
+          Experimental Xatu ClickHouse cluster with devnet Ethereum event data.
+          Contains beacon chain events (blocks, attestations, blob sidecars, etc.)
+          and execution layer data for devnet networks only.
+          IMPORTANT: Always filter by the table's partition key AND meta_network_name.
+          Use clickhouse://tables/{table} to discover available tables and columns.
+        host: "${CLICKHOUSE_EXPERIMENTAL_HOST}"
+        database: "${CLICKHOUSE_EXPERIMENTAL_DATABASE}"
+        username: "${CLICKHOUSE_EXPERIMENTAL_USERNAME}"
+        password: "${CLICKHOUSE_EXPERIMENTAL_PASSWORD}"
+        secure: true
+        timeout: 120
 
-# Prometheus configuration
-# Direct connections to Prometheus/VictoriaMetrics instances.
-prometheus:
-  - name: "ethpandaops"
-    description: |
-      Prometheus/VictoriaMetrics for infrastructure metrics.
-      Contains beacon node metrics, validator metrics, and system health data.
-      Common labels: ingress_user, container, pod, namespace, instance.
-    url: "${PROMETHEUS_URL}"  # e.g., https://prometheus.example.com
-    username: "${PROMETHEUS_USERNAME}"  # Optional (for basic auth)
-    password: "${PROMETHEUS_PASSWORD}"  # Optional
-    skip_verify: false  # Skip TLS cert verification (default: false)
-    timeout: 60  # Query timeout in seconds
+    # ClickHouse schema discovery configuration
+    # Discovers table schemas from configured ClickHouse clusters.
+    schema_discovery:
+      # enabled: true  # Defaults to true if datasources are configured
+      refresh_interval: 15m  # How often to refresh schema cache
 
-# Loki configuration
-# Direct connections to Loki instances for log queries.
-loki:
-  - name: "ethpandaops"
-    description: |
-      Loki cluster for beacon node and validator logs.
-      Must filter by label (e.g., ingress_user, container, pod, namespace).
-      Common queries: error patterns, consensus issues, peer connectivity.
-    url: "${LOKI_URL}"  # e.g., https://loki.example.com
-    username: "${LOKI_USERNAME}"  # Optional (for basic auth)
-    password: "${LOKI_PASSWORD}"  # Optional
-    skip_verify: false  # Skip TLS cert verification (default: false)
-    timeout: 60  # Query timeout in seconds
+      # Datasources to discover schemas from
+      datasources:
+        - name: "xatu"      # References clusters[].name above
+          cluster: "xatu"   # Logical cluster name for resources
+        - name: "xatu-cbt"
+          cluster: "xatu-cbt"
+        - name: "xatu-experimental"
+          cluster: "xatu-experimental"
+
+  # Prometheus configuration
+  # Direct connections to Prometheus/VictoriaMetrics instances.
+  prometheus:
+    instances:
+      - name: "ethpandaops"
+        description: |
+          Prometheus/VictoriaMetrics for infrastructure metrics.
+          Contains beacon node metrics, validator metrics, and system health data.
+          Common labels: ingress_user, container, pod, namespace, instance.
+        url: "${PROMETHEUS_URL}"  # e.g., https://prometheus.example.com
+        username: "${PROMETHEUS_USERNAME}"  # Optional (for basic auth)
+        password: "${PROMETHEUS_PASSWORD}"  # Optional
+        skip_verify: false  # Skip TLS cert verification (default: false)
+        timeout: 60  # Query timeout in seconds
+
+  # Loki configuration
+  # Direct connections to Loki instances for log queries.
+  loki:
+    instances:
+      - name: "ethpandaops"
+        description: |
+          Loki cluster for beacon node and validator logs.
+          Must filter by label (e.g., ingress_user, container, pod, namespace).
+          Common queries: error patterns, consensus issues, peer connectivity.
+        url: "${LOKI_URL}"  # e.g., https://loki.example.com
+        username: "${LOKI_USERNAME}"  # Optional (for basic auth)
+        password: "${LOKI_PASSWORD}"  # Optional
+        skip_verify: false  # Skip TLS cert verification (default: false)
+        timeout: 60  # Query timeout in seconds
 
 # Sandbox configuration
 sandbox:
   # Backend: docker (local dev) | gvisor (production)
   backend: docker
-  image: "xatu-mcp-sandbox:latest"
+  image: "mcp-sandbox:latest"
   timeout: 60  # seconds
   memory_limit: "2g"
   cpu_limit: 1.0
   # Network for sandbox containers. In stdio mode (outside docker-compose),
   # the server auto-creates this network if it doesn't exist.
   network: "mcp-internal"
-  # host_shared_path: "/tmp/xatu-mcp-sandbox"  # Docker-in-Docker: host-visible path for bind mounts
+  # host_shared_path: "/tmp/mcp-sandbox"  # Docker-in-Docker: host-visible path for bind mounts
 
   # Sessions configuration (optional)
   # When enabled, sandbox containers persist between calls (enabled by default)
@@ -115,7 +133,7 @@ storage:
   endpoint: "${S3_ENDPOINT}"  # e.g., http://minio:9000 or https://xxx.r2.cloudflarestorage.com
   access_key: "${S3_ACCESS_KEY}"
   secret_key: "${S3_SECRET_KEY}"
-  bucket: "xatu-mcp-outputs"
+  bucket: "mcp-outputs"
   region: "us-east-1"
   public_url_prefix: "${S3_PUBLIC_URL}"  # e.g., https://outputs.example.com
 
@@ -143,29 +161,8 @@ observability:
   metrics_enabled: true
   metrics_port: 31490
 
-  tracing_enabled: false
-  # otlp_endpoint: "${OTLP_ENDPOINT}"
-
-# ClickHouse schema discovery configuration
-# Discovers table schemas from configured ClickHouse clusters.
-# Each datasource must reference a name from the clickhouse config above.
-schema_discovery:
-  # enabled: true  # Defaults to true if datasources are configured
-  refresh_interval: 15m  # How often to refresh schema cache
-
-  # Datasources to discover schemas from
-  # Each entry maps a ClickHouse cluster name to a logical cluster name
-  datasources:
-    - name: "xatu"      # References clickhouse[].name above
-      cluster: "xatu"   # Logical cluster name for resources
-    - name: "xatu-cbt"
-      cluster: "xatu-cbt"
-    - name: "xatu-experimental"
-      cluster: "xatu-experimental"
-
-# Semantic search configuration
-# Enables vector-similarity search over query examples.
+# Semantic search configuration (required).
+# Ensure the model file exists at the configured path.
 # semantic_search:
-#   enabled: true                  # Defaults to true if model_path exists on disk
-#   model_path: "/usr/share/xatu-mcp/MiniLM-L6-v2.Q8_0.gguf"  # GGUF embedding model
-#   gpu_layers: 0                  # Layers to offload to GPU (0 = CPU only)
+#   model_path: "models/MiniLM-L6-v2.Q8_0.gguf"  # Local dev default; in Docker image it's /usr/share/mcp/...
+#   gpu_layers: 0                               # Layers to offload to GPU (0 = CPU only)

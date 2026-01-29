@@ -6,22 +6,23 @@ import (
 	"github.com/kelindar/search"
 	"github.com/sirupsen/logrus"
 
-	"github.com/ethpandaops/xatu-mcp/pkg/embedding"
+	"github.com/ethpandaops/mcp/pkg/embedding"
+	"github.com/ethpandaops/mcp/pkg/types"
 )
 
 // SearchResult includes the example and its similarity score.
 type SearchResult struct {
-	CategoryKey   string       `json:"category_key"`
-	CategoryName  string       `json:"category_name"`
-	Example       QueryExample `json:"example"`
-	Score         float64      `json:"similarity_score"`
+	CategoryKey  string        `json:"category_key"`
+	CategoryName string        `json:"category_name"`
+	Example      types.Example `json:"example"`
+	Score        float64       `json:"similarity_score"`
 }
 
 // indexedExample holds metadata for a searchable example.
 type indexedExample struct {
 	CategoryKey  string
 	CategoryName string
-	Example      QueryExample
+	Example      types.Example
 }
 
 // ExampleIndex provides semantic search over query examples.
@@ -31,14 +32,20 @@ type ExampleIndex struct {
 	examples []indexedExample
 }
 
-// NewExampleIndex creates and populates a semantic search index from query examples.
-func NewExampleIndex(log logrus.FieldLogger, embedder *embedding.Embedder, categories map[string]QueryCategory) (*ExampleIndex, error) {
+// NewExampleIndex creates and populates a semantic search index
+// from query examples.
+func NewExampleIndex(
+	log logrus.FieldLogger,
+	embedder *embedding.Embedder,
+	categories map[string]types.ExampleCategory,
+) (*ExampleIndex, error) {
 	log = log.WithField("component", "example_index")
 
 	index := search.NewIndex[int]()
 	var examples []indexedExample
 
 	i := 0
+
 	for catKey, cat := range categories {
 		for _, ex := range cat.Examples {
 			text := ex.Name + ". " + ex.Description

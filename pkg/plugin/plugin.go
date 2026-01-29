@@ -1,0 +1,63 @@
+// Package plugin defines the Plugin interface and registry for
+// datasource plugins that extend the MCP server.
+package plugin
+
+import (
+	"context"
+
+	"github.com/sirupsen/logrus"
+
+	"github.com/ethpandaops/mcp/pkg/types"
+)
+
+// ResourceRegistry is the interface plugins use to register MCP resources.
+// This avoids a circular dependency between plugin and resource packages.
+// pkg/resource.Registry satisfies this interface.
+type ResourceRegistry interface {
+	RegisterStatic(res types.StaticResource)
+	RegisterTemplate(res types.TemplateResource)
+}
+
+// Plugin is the interface that all datasource plugins must implement.
+type Plugin interface {
+	// Name returns the plugin identifier (e.g. "clickhouse").
+	Name() string
+
+	// Init parses the raw YAML config section for this plugin.
+	Init(rawConfig []byte) error
+
+	// ApplyDefaults sets default values before validation.
+	ApplyDefaults()
+
+	// Validate checks that the parsed config is valid.
+	Validate() error
+
+	// SandboxEnv returns environment variables to inject into
+	// the sandbox container for this plugin's Python module.
+	SandboxEnv() (map[string]string, error)
+
+	// DatasourceInfo returns metadata about configured datasources
+	// for the datasources:// MCP resource.
+	DatasourceInfo() []types.DatasourceInfo
+
+	// Examples returns query examples organized by category.
+	Examples() map[string]types.ExampleCategory
+
+	// PythonAPIDocs returns API documentation for the plugin's
+	// Python module, keyed by module name.
+	PythonAPIDocs() map[string]types.ModuleDoc
+
+	// GettingStartedSnippet returns a Markdown snippet to include
+	// in the getting-started resource.
+	GettingStartedSnippet() string
+
+	// RegisterResources registers any custom MCP resources
+	// (e.g. clickhouse://tables) with the resource registry.
+	RegisterResources(log logrus.FieldLogger, reg ResourceRegistry) error
+
+	// Start performs async initialization (e.g. schema discovery).
+	Start(ctx context.Context) error
+
+	// Stop cleans up resources.
+	Stop(ctx context.Context) error
+}

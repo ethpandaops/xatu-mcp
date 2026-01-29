@@ -1,4 +1,4 @@
-// Package config provides configuration loading for xatu-mcp.
+// Package config provides configuration loading for the MCP server.
 package config
 
 import (
@@ -14,16 +14,13 @@ import (
 
 // Config is the main configuration structure.
 type Config struct {
-	Server          ServerConfig          `yaml:"server"`
-	ClickHouse      []ClickHouseConfig    `yaml:"clickhouse"`
-	Prometheus      []PrometheusConfig    `yaml:"prometheus"`
-	Loki            []LokiConfig          `yaml:"loki"`
-	Auth            AuthConfig            `yaml:"auth"`
-	Sandbox         SandboxConfig         `yaml:"sandbox"`
-	Storage         *StorageConfig        `yaml:"storage,omitempty"`
-	Observability   ObservabilityConfig   `yaml:"observability"`
-	SchemaDiscovery SchemaDiscoveryConfig `yaml:"schema_discovery"`
-	SemanticSearch  SemanticSearchConfig  `yaml:"semantic_search"`
+	Server         ServerConfig         `yaml:"server"`
+	Plugins        map[string]yaml.Node `yaml:"plugins"`
+	Auth           AuthConfig           `yaml:"auth"`
+	Sandbox        SandboxConfig        `yaml:"sandbox"`
+	Storage        *StorageConfig       `yaml:"storage,omitempty"`
+	Observability  ObservabilityConfig  `yaml:"observability"`
+	SemanticSearch SemanticSearchConfig `yaml:"semantic_search"`
 }
 
 // AuthConfig holds authentication configuration.
@@ -53,153 +50,13 @@ type ServerConfig struct {
 	Transport string `yaml:"transport"`
 }
 
-// ClickHouseConfig holds configuration for a ClickHouse cluster.
-type ClickHouseConfig struct {
-	// Name is the logical identifier for this cluster (required).
-	Name string `yaml:"name" json:"name"`
-
-	// Description provides context about this cluster for LLM consumption.
-	Description string `yaml:"description,omitempty" json:"description,omitempty"`
-
-	// Host is the ClickHouse server address in host:port format (required).
-	Host string `yaml:"host" json:"host"`
-
-	// Database is the default database to use (required).
-	Database string `yaml:"database" json:"database"`
-
-	// Username is the authentication username (required).
-	Username string `yaml:"username" json:"username"`
-
-	// Password is the authentication password (required).
-	Password string `yaml:"password" json:"password"`
-
-	// Secure enables TLS for the connection. Defaults to true.
-	Secure *bool `yaml:"secure,omitempty" json:"secure,omitempty"`
-
-	// SkipVerify disables TLS certificate verification. Defaults to false.
-	SkipVerify bool `yaml:"skip_verify,omitempty" json:"skip_verify,omitempty"`
-
-	// Timeout is the query timeout in seconds. Defaults to 120.
-	Timeout int `yaml:"timeout,omitempty" json:"timeout,omitempty"`
-
-	// Protocol specifies the connection protocol: "native" or "http". Defaults to "native".
-	// Use "http" for HTTPS connections through proxies like Cloudflare.
-	Protocol string `yaml:"protocol,omitempty" json:"protocol,omitempty"`
-}
-
-// IsHTTP returns whether HTTP protocol should be used.
-func (c *ClickHouseConfig) IsHTTP() bool {
-	return c.Protocol == "http"
-}
-
-// IsSecure returns whether TLS is enabled (defaults to true).
-func (c *ClickHouseConfig) IsSecure() bool {
-	if c.Secure == nil {
-		return true
-	}
-
-	return *c.Secure
-}
-
-// PrometheusConfig holds configuration for a Prometheus instance.
-type PrometheusConfig struct {
-	// Name is the logical identifier for this instance (required).
-	Name string `yaml:"name" json:"name"`
-
-	// Description provides context about this instance for LLM consumption.
-	Description string `yaml:"description,omitempty" json:"description,omitempty"`
-
-	// URL is the Prometheus server URL (required).
-	URL string `yaml:"url" json:"url"`
-
-	// Username is the authentication username (optional, for basic auth).
-	Username string `yaml:"username,omitempty" json:"username,omitempty"`
-
-	// Password is the authentication password (optional, for basic auth).
-	Password string `yaml:"password,omitempty" json:"password,omitempty"`
-
-	// SkipVerify disables TLS certificate verification. Defaults to false.
-	SkipVerify bool `yaml:"skip_verify,omitempty" json:"skip_verify,omitempty"`
-
-	// Timeout is the query timeout in seconds. Defaults to 60.
-	Timeout int `yaml:"timeout,omitempty" json:"timeout,omitempty"`
-}
-
-// LokiConfig holds configuration for a Loki instance.
-type LokiConfig struct {
-	// Name is the logical identifier for this instance (required).
-	Name string `yaml:"name" json:"name"`
-
-	// Description provides context about this instance for LLM consumption.
-	Description string `yaml:"description,omitempty" json:"description,omitempty"`
-
-	// URL is the Loki server URL (required).
-	URL string `yaml:"url" json:"url"`
-
-	// Username is the authentication username (optional, for basic auth).
-	Username string `yaml:"username,omitempty" json:"username,omitempty"`
-
-	// Password is the authentication password (optional, for basic auth).
-	Password string `yaml:"password,omitempty" json:"password,omitempty"`
-
-	// SkipVerify disables TLS certificate verification. Defaults to false.
-	SkipVerify bool `yaml:"skip_verify,omitempty" json:"skip_verify,omitempty"`
-
-	// Timeout is the query timeout in seconds. Defaults to 60.
-	Timeout int `yaml:"timeout,omitempty" json:"timeout,omitempty"`
-}
-
-// SchemaDiscoveryConfig holds configuration for ClickHouse schema discovery.
-type SchemaDiscoveryConfig struct {
-	// Enabled controls whether schema discovery is active. Defaults to true if datasources are configured.
-	Enabled *bool `yaml:"enabled,omitempty"`
-
-	// RefreshInterval is the duration between schema refresh cycles. Defaults to 15 minutes.
-	RefreshInterval time.Duration `yaml:"refresh_interval,omitempty"`
-
-	// Datasources lists the ClickHouse clusters to discover schemas from.
-	// Each entry references a ClickHouse cluster by name.
-	Datasources []SchemaDiscoveryDatasource `yaml:"datasources"`
-}
-
-// SchemaDiscoveryDatasource maps a ClickHouse cluster name to a logical cluster name for schema discovery.
-type SchemaDiscoveryDatasource struct {
-	// Name references a ClickHouse cluster by its name (from clickhouse[].name).
-	Name string `yaml:"name"`
-
-	// Cluster is the logical cluster name used in schema resources (e.g., "xatu", "xatu-cbt").
-	Cluster string `yaml:"cluster"`
-}
-
-// IsEnabled returns whether schema discovery is enabled.
-// Defaults to true if at least one datasource is configured.
-func (c *SchemaDiscoveryConfig) IsEnabled() bool {
-	if c.Enabled != nil {
-		return *c.Enabled
-	}
-
-	return len(c.Datasources) > 0
-}
-
 // SemanticSearchConfig holds configuration for semantic example search.
 type SemanticSearchConfig struct {
-	// Enabled controls whether semantic search is active. Defaults to true if model path exists.
-	Enabled *bool `yaml:"enabled,omitempty"`
-
-	// ModelPath is the path to the GGUF embedding model file.
+	// ModelPath is the path to the GGUF embedding model file (required).
 	ModelPath string `yaml:"model_path,omitempty"`
 
 	// GPULayers is the number of layers to offload to GPU (0 = CPU only).
 	GPULayers int `yaml:"gpu_layers,omitempty"`
-}
-
-// IsEnabled returns whether semantic search is enabled.
-// Defaults to true if a model path is configured.
-func (c *SemanticSearchConfig) IsEnabled() bool {
-	if c.Enabled != nil {
-		return *c.Enabled
-	}
-	return c.ModelPath != ""
 }
 
 // SandboxConfig holds sandbox execution configuration.
@@ -233,6 +90,7 @@ func (c *SessionConfig) IsEnabled() bool {
 	if c.Enabled == nil {
 		return true // Default to enabled
 	}
+
 	return *c.Enabled
 }
 
@@ -248,10 +106,8 @@ type StorageConfig struct {
 
 // ObservabilityConfig holds observability configuration.
 type ObservabilityConfig struct {
-	MetricsEnabled bool   `yaml:"metrics_enabled"`
-	MetricsPort    int    `yaml:"metrics_port"`
-	TracingEnabled bool   `yaml:"tracing_enabled"`
-	OTLPEndpoint   string `yaml:"otlp_endpoint,omitempty"`
+	MetricsEnabled bool `yaml:"metrics_enabled"`
+	MetricsPort    int  `yaml:"metrics_port"`
 }
 
 // envVarPattern matches ${VAR_NAME} patterns for environment variable substitution.
@@ -292,6 +148,22 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
+// PluginConfigYAML returns the raw YAML bytes for a given plugin name.
+// Returns nil if the plugin is not configured.
+func (c *Config) PluginConfigYAML(name string) ([]byte, error) {
+	node, ok := c.Plugins[name]
+	if !ok {
+		return nil, nil
+	}
+
+	data, err := yaml.Marshal(&node)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling plugin %q config: %w", name, err)
+	}
+
+	return data, nil
+}
+
 // substituteEnvVars replaces ${VAR_NAME} patterns with environment variable values.
 // Lines that are comments (starting with #) are skipped to allow commented optional sections
 // in config files without requiring their environment variables to be set.
@@ -313,6 +185,7 @@ func substituteEnvVars(content string) (string, error) {
 				missingVars = append(missingVars, varName)
 				return match
 			}
+
 			return value
 		})
 	}
@@ -329,43 +202,27 @@ func applyDefaults(cfg *Config) {
 	if cfg.Server.Host == "" {
 		cfg.Server.Host = "0.0.0.0"
 	}
+
 	if cfg.Server.Port == 0 {
 		cfg.Server.Port = 2480
 	}
+
 	if cfg.Server.Transport == "" {
 		cfg.Server.Transport = "stdio"
-	}
-
-	// ClickHouse defaults.
-	for i := range cfg.ClickHouse {
-		if cfg.ClickHouse[i].Timeout == 0 {
-			cfg.ClickHouse[i].Timeout = 120
-		}
-	}
-
-	// Prometheus defaults.
-	for i := range cfg.Prometheus {
-		if cfg.Prometheus[i].Timeout == 0 {
-			cfg.Prometheus[i].Timeout = 60
-		}
-	}
-
-	// Loki defaults.
-	for i := range cfg.Loki {
-		if cfg.Loki[i].Timeout == 0 {
-			cfg.Loki[i].Timeout = 60
-		}
 	}
 
 	if cfg.Sandbox.Backend == "" {
 		cfg.Sandbox.Backend = "docker"
 	}
+
 	if cfg.Sandbox.Timeout == 0 {
 		cfg.Sandbox.Timeout = 60
 	}
+
 	if cfg.Sandbox.MemoryLimit == "" {
 		cfg.Sandbox.MemoryLimit = "2g"
 	}
+
 	if cfg.Sandbox.CPULimit == 0 {
 		cfg.Sandbox.CPULimit = 1.0
 	}
@@ -387,15 +244,26 @@ func applyDefaults(cfg *Config) {
 		cfg.Observability.MetricsPort = 2490
 	}
 
-	// Schema discovery defaults.
-	if cfg.SchemaDiscovery.RefreshInterval == 0 {
-		cfg.SchemaDiscovery.RefreshInterval = 15 * time.Minute
-	}
-
 	// Semantic search defaults.
 	if cfg.SemanticSearch.ModelPath == "" {
-		cfg.SemanticSearch.ModelPath = "/usr/share/xatu-mcp/MiniLM-L6-v2.Q8_0.gguf"
+		// Prefer local dev path if present, otherwise fall back to container path.
+		localPath := "models/MiniLM-L6-v2.Q8_0.gguf"
+		containerPath := "/usr/share/mcp/MiniLM-L6-v2.Q8_0.gguf"
+
+		switch {
+		case fileExists(localPath):
+			cfg.SemanticSearch.ModelPath = localPath
+		case fileExists(containerPath):
+			cfg.SemanticSearch.ModelPath = containerPath
+		default:
+			cfg.SemanticSearch.ModelPath = localPath
+		}
 	}
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // MaxSandboxTimeout is the maximum allowed sandbox timeout in seconds.
@@ -403,76 +271,6 @@ const MaxSandboxTimeout = 600
 
 // Validate validates the configuration.
 func (c *Config) Validate() error {
-	// Validate ClickHouse configs.
-	chNames := make(map[string]struct{}, len(c.ClickHouse))
-	for i, ch := range c.ClickHouse {
-		if ch.Name == "" {
-			return fmt.Errorf("clickhouse[%d].name is required", i)
-		}
-		if _, exists := chNames[ch.Name]; exists {
-			return fmt.Errorf("clickhouse[%d].name %q is duplicated", i, ch.Name)
-		}
-		chNames[ch.Name] = struct{}{}
-
-		if ch.Host == "" {
-			return fmt.Errorf("clickhouse[%d].host is required", i)
-		}
-		if ch.Database == "" {
-			return fmt.Errorf("clickhouse[%d].database is required", i)
-		}
-		if ch.Username == "" {
-			return fmt.Errorf("clickhouse[%d].username is required", i)
-		}
-		if ch.Password == "" {
-			return fmt.Errorf("clickhouse[%d].password is required", i)
-		}
-	}
-
-	// Validate Prometheus configs.
-	promNames := make(map[string]struct{}, len(c.Prometheus))
-	for i, p := range c.Prometheus {
-		if p.Name == "" {
-			return fmt.Errorf("prometheus[%d].name is required", i)
-		}
-		if _, exists := promNames[p.Name]; exists {
-			return fmt.Errorf("prometheus[%d].name %q is duplicated", i, p.Name)
-		}
-		promNames[p.Name] = struct{}{}
-
-		if p.URL == "" {
-			return fmt.Errorf("prometheus[%d].url is required", i)
-		}
-	}
-
-	// Validate Loki configs.
-	lokiNames := make(map[string]struct{}, len(c.Loki))
-	for i, l := range c.Loki {
-		if l.Name == "" {
-			return fmt.Errorf("loki[%d].name is required", i)
-		}
-		if _, exists := lokiNames[l.Name]; exists {
-			return fmt.Errorf("loki[%d].name %q is duplicated", i, l.Name)
-		}
-		lokiNames[l.Name] = struct{}{}
-
-		if l.URL == "" {
-			return fmt.Errorf("loki[%d].url is required", i)
-		}
-	}
-
-	// Validate schema discovery datasources reference valid ClickHouse clusters.
-	for i, ds := range c.SchemaDiscovery.Datasources {
-		if ds.Name == "" {
-			return fmt.Errorf("schema_discovery.datasources[%d].name is required", i)
-		}
-		if ds.Cluster == "" {
-			return fmt.Errorf("schema_discovery.datasources[%d].cluster is required", i)
-		}
-		if _, exists := chNames[ds.Name]; !exists {
-			return fmt.Errorf("schema_discovery.datasources[%d].name %q does not reference a configured clickhouse cluster", i, ds.Name)
-		}
-	}
-
 	if c.Sandbox.Image == "" {
 		return errors.New("sandbox.image is required")
 	}

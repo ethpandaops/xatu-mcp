@@ -4,28 +4,22 @@ package resource
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"sync"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/sirupsen/logrus"
+
+	"github.com/ethpandaops/mcp/pkg/types"
 )
 
 // ReadHandler is a function that reads a resource and returns its content.
-type ReadHandler func(ctx context.Context, uri string) (string, error)
+type ReadHandler = types.ReadHandler
 
 // StaticResource represents a static resource with a fixed URI.
-type StaticResource struct {
-	Resource mcp.Resource
-	Handler  ReadHandler
-}
+type StaticResource = types.StaticResource
 
 // TemplateResource represents a resource template with URI parameters.
-type TemplateResource struct {
-	Template mcp.ResourceTemplate
-	Pattern  *regexp.Regexp
-	Handler  ReadHandler
-}
+type TemplateResource = types.TemplateResource
 
 // Registry manages MCP resources and their handlers.
 type Registry interface {

@@ -6,7 +6,7 @@ import (
 
 	"github.com/docker/docker/api/types/system"
 	"github.com/docker/docker/client"
-	"github.com/ethpandaops/xatu-mcp/pkg/config"
+	"github.com/ethpandaops/mcp/pkg/config"
 	"github.com/sirupsen/logrus"
 )
 

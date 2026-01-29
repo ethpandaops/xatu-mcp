@@ -67,8 +67,8 @@ jobs:
         working-directory: tests/eval
         run: uv sync
 
-      - name: Build xatu-mcp server
-        run: go build -o xatu-mcp ./cmd/xatu-mcp
+      - name: Build MCP server
+        run: go build -o mcp ./cmd/mcp
 
       - name: Create CI config
         run: |
@@ -80,24 +80,24 @@ jobs:
           auth:
             enabled: false
 
-          clickhouse:
-            - name: xatu
-              host: "${{ secrets.CLICKHOUSE_XATU_HOST }}"
-              port: 9440
-              database: default
-              username: "${{ secrets.CLICKHOUSE_XATU_USERNAME }}"
-              password: "${{ secrets.CLICKHOUSE_XATU_PASSWORD }}"
-              ssl: true
-            - name: xatu-cbt
-              host: "${{ secrets.CLICKHOUSE_CBT_HOST }}"
-              port: 9440
-              database: default
-              username: "${{ secrets.CLICKHOUSE_CBT_USERNAME }}"
-              password: "${{ secrets.CLICKHOUSE_CBT_PASSWORD }}"
-              ssl: true
+          plugins:
+            clickhouse:
+              clusters:
+                - name: xatu
+                  host: "${{ secrets.CLICKHOUSE_XATU_HOST }}"
+                  database: default
+                  username: "${{ secrets.CLICKHOUSE_XATU_USERNAME }}"
+                  password: "${{ secrets.CLICKHOUSE_XATU_PASSWORD }}"
+                  secure: true
+                - name: xatu-cbt
+                  host: "${{ secrets.CLICKHOUSE_CBT_HOST }}"
+                  database: default
+                  username: "${{ secrets.CLICKHOUSE_CBT_USERNAME }}"
+                  password: "${{ secrets.CLICKHOUSE_CBT_PASSWORD }}"
+                  secure: true
 
           sandbox:
-            image: "ghcr.io/ethpandaops/xatu-mcp-sandbox:latest"
+            image: "ghcr.io/ethpandaops/mcp-sandbox:latest"
 
           storage:
             type: "s3"
@@ -109,9 +109,9 @@ jobs:
               secret_access_key: "${{ secrets.S3_SECRET_ACCESS_KEY }}"
           EOF
 
-      - name: Start xatu-mcp server
+      - name: Start MCP server
         run: |
-          ./xatu-mcp serve --config config.ci.yaml &
+          ./mcp serve --config config.ci.yaml &
           # Wait for server to be ready
           for i in {1..30}; do
             if curl -s http://localhost:2480/health > /dev/null 2>&1; then
@@ -126,9 +126,9 @@ jobs:
         working-directory: tests/eval
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          XATU_EVAL_XATU_MCP_URL: http://localhost:2480
-          XATU_EVAL_MODEL: ${{ inputs.model || 'claude-sonnet-4-5' }}
-          XATU_EVAL_VERBOSE: ${{ inputs.verbose || 'false' }}
+          MCP_EVAL_MCP_URL: http://localhost:2480
+          MCP_EVAL_MODEL: ${{ inputs.model || 'claude-sonnet-4-5' }}
+          MCP_EVAL_VERBOSE: ${{ inputs.verbose || 'false' }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}  # For DeepEval metrics
         run: |
           PYTEST_ARGS="tests/"

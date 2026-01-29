@@ -7,9 +7,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ethpandaops/xatu-mcp/pkg/resource"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/sirupsen/logrus"
+
+	"github.com/ethpandaops/mcp/pkg/plugin"
+	"github.com/ethpandaops/mcp/pkg/resource"
 )
 
 const (
@@ -21,7 +23,7 @@ const (
 
 const searchExamplesDescription = `Search ClickHouse query examples using semantic search.
 
-Returns matching examples with full SQL queries. Each result includes target cluster (xatu vs xatu-cbt) - see xatu://getting-started for syntax differences.
+Returns matching examples with full SQL queries. Each result includes target cluster (xatu vs xatu-cbt) - see mcp://getting-started for syntax differences.
 
 Examples: search_examples(query="block"), search_examples(query="validator", category="validators")`
 
@@ -44,14 +46,16 @@ type SearchExamplesResponse struct {
 }
 
 type searchExamplesHandler struct {
-	log   logrus.FieldLogger
-	index *resource.ExampleIndex
+	log       logrus.FieldLogger
+	index     *resource.ExampleIndex
+	pluginReg *plugin.Registry
 }
 
-func NewSearchExamplesTool(log logrus.FieldLogger, index *resource.ExampleIndex) Definition {
+func NewSearchExamplesTool(log logrus.FieldLogger, index *resource.ExampleIndex, pluginReg *plugin.Registry) Definition {
 	h := &searchExamplesHandler{
-		log:   log.WithField("tool", SearchExamplesToolName),
-		index: index,
+		log:       log.WithField("tool", SearchExamplesToolName),
+		index:     index,
+		pluginReg: pluginReg,
 	}
 
 	return Definition{
@@ -102,8 +106,14 @@ func (h *searchExamplesHandler) handle(_ context.Context, request mcp.CallToolRe
 		limit = MaxSearchLimit
 	}
 
-	examples := resource.GetQueryExamples()
-	categories := resource.GetQueryCategories()
+	examples := resource.GetQueryExamples(h.pluginReg)
+
+	categories := make([]string, 0, len(examples))
+	for k := range examples {
+		categories = append(categories, k)
+	}
+
+	sort.Strings(categories)
 
 	if categoryFilter != "" {
 		if _, ok := examples[categoryFilter]; !ok {
@@ -114,8 +124,6 @@ func (h *searchExamplesHandler) handle(_ context.Context, request mcp.CallToolRe
 			)), nil
 		}
 	}
-
-	sort.Strings(categories)
 
 	results, err := h.index.Search(query, limit)
 	if err != nil {

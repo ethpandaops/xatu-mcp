@@ -1,4 +1,4 @@
-// Package observability provides metrics and tracing capabilities for xatu-mcp.
+// Package observability provides metrics capabilities for ethpandaops-mcp.
 package observability
 
 import (
@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethpandaops/xatu-mcp/pkg/config"
+	"github.com/ethpandaops/mcp/pkg/config"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
 )

@@ -19,21 +19,21 @@ import (
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
-	"github.com/ethpandaops/xatu-mcp/pkg/config"
+	"github.com/ethpandaops/mcp/pkg/config"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 )
 
-// Container label keys for identifying and managing xatu-mcp containers.
+// Container label keys for identifying and managing ethpandaops-mcp containers.
 const (
-	// LabelManaged identifies containers created by xatu-mcp.
-	LabelManaged = "io.xatu-mcp.managed"
+	// LabelManaged identifies containers created by ethpandaops-mcp.
+	LabelManaged = "io.ethpandaops-mcp.managed"
 	// LabelCreatedAt stores the Unix timestamp when the container was created.
-	LabelCreatedAt = "io.xatu-mcp.created-at"
+	LabelCreatedAt = "io.ethpandaops-mcp.created-at"
 	// LabelSessionID stores the session ID for session containers.
-	LabelSessionID = "io.xatu-mcp.session-id"
+	LabelSessionID = "io.ethpandaops-mcp.session-id"
 	// LabelOwnerID stores the owner ID (GitHub user ID) if auth is enabled.
-	LabelOwnerID = "io.xatu-mcp.owner-id"
+	LabelOwnerID = "io.ethpandaops-mcp.owner-id"
 )
 
 // parseContainerCreatedAt extracts the creation time from container labels.
@@ -243,7 +243,7 @@ func (b *DockerBackend) executeEphemeral(ctx context.Context, req ExecuteRequest
 		env = make(map[string]string)
 	}
 
-	env["XATU_EXECUTION_ID"] = executionID
+	env["ETHPANDAOPS_EXECUTION_ID"] = executionID
 
 	// Build container configuration.
 	containerConfig, hostConfig, err := b.buildContainerConfig(sharedDir, outputDir, env)
@@ -522,7 +522,7 @@ func (b *DockerBackend) execInContainer(
 	// Write the script to the container using docker exec with heredoc.
 	scriptPath := fmt.Sprintf("/tmp/script_%s.py", executionID)
 
-	writeCmd := []string{"sh", "-c", fmt.Sprintf("cat > %s << 'XATU_EOF'\n%s\nXATU_EOF", scriptPath, code)}
+	writeCmd := []string{"sh", "-c", fmt.Sprintf("cat > %s << 'MCP_EOF'\n%s\nMCP_EOF", scriptPath, code)}
 
 	writeConfig := container.ExecOptions{
 		Cmd:          writeCmd,
@@ -539,11 +539,11 @@ func (b *DockerBackend) execInContainer(
 		return nil, fmt.Errorf("starting write exec: %w", err)
 	}
 
-	// Execute the script with XATU_EXECUTION_ID env var for storage.upload().
+	// Execute the script with ETHPANDAOPS_EXECUTION_ID env var for storage.upload().
 	startTime := time.Now()
 
 	execConfig := container.ExecOptions{
-		Cmd:          []string{"sh", "-c", fmt.Sprintf("XATU_EXECUTION_ID=%s python %s", executionID, scriptPath)},
+		Cmd:          []string{"sh", "-c", fmt.Sprintf("ETHPANDAOPS_EXECUTION_ID=%s python %s", executionID, scriptPath)},
 		AttachStdout: true,
 		AttachStderr: true,
 	}
@@ -708,7 +708,7 @@ func (b *DockerBackend) createExecutionDirs(executionID string) (string, error) 
 		baseDir = filepath.Join(b.cfg.HostSharedPath, executionID)
 	} else {
 		// Direct mode: use temp directory.
-		baseDir = filepath.Join(os.TempDir(), "xatu-sandbox-"+executionID)
+		baseDir = filepath.Join(os.TempDir(), "mcp-sandbox-"+executionID)
 	}
 
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
@@ -997,7 +997,7 @@ func (b *DockerBackend) listAllSessionContainers(ctx context.Context) ([]*Sessio
 	return result, nil
 }
 
-// cleanupExpiredContainers removes xatu-mcp containers that have exceeded max session duration.
+// cleanupExpiredContainers removes ethpandaops-mcp containers that have exceeded max session duration.
 // This handles orphaned containers from previous server instances that were killed abruptly.
 func (b *DockerBackend) cleanupExpiredContainers(ctx context.Context) error {
 	// Find all containers with our managed label.

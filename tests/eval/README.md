@@ -1,10 +1,10 @@
-# xatu-mcp Evaluation Harness
+# ethpandaops-mcp Evaluation Harness
 
-LLM evaluation framework for testing the xatu-mcp MCP server using **Claude Agent SDK (Python)** and **DeepEval**.
+LLM evaluation framework for testing the ethpandaops-mcp server using **Claude Agent SDK (Python)** and **DeepEval**.
 
 ## Overview
 
-This evaluation harness tests end-to-end task completion against the xatu-mcp MCP server with live ClickHouse data. It uses:
+This evaluation harness tests end-to-end task completion against the ethpandaops-mcp server with live ClickHouse data. It uses:
 
 - **[Claude Agent SDK (Python)](https://platform.claude.com/docs/en/agent-sdk/python)** - Same agent loop that powers Claude Code, native MCP support
 - **[DeepEval](https://github.com/confident-ai/deepeval)** - Rich agent-specific metrics, pytest integration
@@ -16,7 +16,7 @@ This evaluation harness tests end-to-end task completion against the xatu-mcp MC
 
 - Python 3.11+
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) installed
-- Running xatu-mcp server (with auth disabled for testing)
+- Running ethpandaops-mcp server (with auth disabled for testing)
 - `ANTHROPIC_API_KEY` environment variable set
 - `OPENAI_API_KEY` environment variable set (for DeepEval LLM-based metrics)
 
@@ -50,7 +50,7 @@ uv run python -m scripts.run_eval -m "not slow"
 uv run python -m scripts.run_eval --list
 
 # Or use the installed script directly
-uv run xatu-eval --model claude-sonnet-4-5
+uv run mcp-eval --model claude-sonnet-4-5
 ```
 
 ### Interactive REPL
@@ -66,7 +66,7 @@ uv run python -m scripts.repl --model claude-haiku-4-5
 uv run python -m scripts.repl --verbose
 
 # Or use the installed script
-uv run xatu-repl --verbose
+uv run mcp-repl --verbose
 ```
 
 REPL Commands:
@@ -127,20 +127,20 @@ Validates visualization output:
 ANTHROPIC_API_KEY=sk-ant-...       # For Claude models
 OPENAI_API_KEY=sk-...              # For DeepEval metrics
 
-# xatu-mcp connection
-XATU_EVAL_XATU_MCP_URL=http://localhost:2480  # Default
+# ethpandaops-mcp connection
+MCP_EVAL_MCP_URL=http://localhost:2480  # Default
 
 # Model selection
-XATU_EVAL_MODEL=claude-sonnet-4-5  # Default
+MCP_EVAL_MODEL=claude-sonnet-4-5  # Default
 
 # Evaluation options
-XATU_EVAL_VERBOSE=false            # Detailed logging
-XATU_EVAL_TRACK_COSTS=true         # Cost tracking
+MCP_EVAL_VERBOSE=false            # Detailed logging
+MCP_EVAL_TRACK_COSTS=true         # Cost tracking
 
 # Metric thresholds
-XATU_EVAL_TOOL_CORRECTNESS_THRESHOLD=0.5
-XATU_EVAL_TASK_COMPLETION_THRESHOLD=0.5
-XATU_EVAL_RESOURCE_DISCOVERY_THRESHOLD=0.7
+MCP_EVAL_TOOL_CORRECTNESS_THRESHOLD=0.5
+MCP_EVAL_TASK_COMPLETION_THRESHOLD=0.5
+MCP_EVAL_RESOURCE_DISCOVERY_THRESHOLD=0.7
 
 # Optional - Confident AI (for dashboards)
 CONFIDENT_API_KEY=...
@@ -202,7 +202,7 @@ Add to `cases/basic_queries.yaml`:
   description: Description of what this tests
   input: "Natural language query for the agent"
   expected_tools:
-    - mcp__xatu__execute_python
+    - mcp__ethpandaops__execute_python
   metrics:
     tool_correctness: 0.8
     task_completion: 0.7
@@ -226,7 +226,7 @@ Add to `cases/multi_step.yaml`:
   steps:
     - prompt: "First step of the workflow"
       expected_tools:
-        - mcp__xatu__execute_python
+        - mcp__ethpandaops__execute_python
       expect_session_id: true
 
     - prompt: "Second step using previous data"
@@ -264,13 +264,13 @@ uv run python -m scripts.langfuse up
 # Wait for startup (~1-2 minutes on first run)
 
 # Enable tracing in your .env
-echo "XATU_EVAL_LANGFUSE_ENABLED=true" >> .env
+echo "MCP_EVAL_LANGFUSE_ENABLED=true" >> .env
 
 # Run tests - traces automatically sent to Langfuse
 uv run python -m scripts.run_eval
 
 # View traces at http://localhost:3000
-# Login: admin@xatu.local / adminadmin
+# Login: admin@mcp.local / adminadmin
 ```
 
 Pre-configured with default API keys - no manual setup needed!
@@ -307,9 +307,9 @@ Langfuse v3 runs with these services:
 
 ### Server Connection Issues
 
-Ensure xatu-mcp server is running with auth disabled:
+Ensure ethpandaops-mcp server is running with auth disabled:
 ```bash
-./xatu-mcp serve --config config.yaml
+./mcp serve --config config.yaml
 # config.yaml should have: auth.enabled: false
 ```
 

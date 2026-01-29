@@ -1,4 +1,4 @@
-"""Data source validation metrics for xatu-mcp evaluation."""
+"""Data source validation metrics for ethpandaops-mcp evaluation."""
 
 from __future__ import annotations
 
@@ -126,7 +126,7 @@ class DataSourceMetric(BaseMetric):
             "from beacon_api_",
             "from mempool_",
             "from mev_relay_",
-            "xatu.clickhouse",
+            "ethpandaops.clickhouse",
         ]
 
         for indicator in clickhouse_indicators:
@@ -143,7 +143,7 @@ class DataSourceMetric(BaseMetric):
 
     def _detect_tables(self, code: str) -> None:
         """Detect which tables were referenced in the code."""
-        # Common xatu table prefixes
+        # Common Xatu table prefixes
         table_patterns = [
             r"FROM\s+([a-zA-Z_][a-zA-Z0-9_]*)",
             r"JOIN\s+([a-zA-Z_][a-zA-Z0-9_]*)",

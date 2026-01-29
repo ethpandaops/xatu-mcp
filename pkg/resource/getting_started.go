@@ -8,6 +8,8 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/sirupsen/logrus"
+
+	"github.com/ethpandaops/mcp/pkg/plugin"
 )
 
 // ToolLister provides access to registered tools.
@@ -16,30 +18,14 @@ type ToolLister interface {
 }
 
 // gettingStartedHeader contains the static workflow guidance.
-const gettingStartedHeader = `# Xatu Getting Started Guide
+const gettingStartedHeader = `# Getting Started Guide
 
 ## Workflow
 
-1. **Discover** → ` + "`datasources://clickhouse`" + ` for cluster names, ` + "`clickhouse://tables`" + ` for schemas
+1. **Discover** → Read datasource resources to find available data sources and schemas
 2. **Find patterns** → ` + "`search_examples`" + ` tool or ` + "`examples://queries`" + ` resource
-3. **Execute** → ` + "`execute_python`" + ` tool with the xatu library
+3. **Execute** → ` + "`execute_python`" + ` tool with the ethpandaops library
 
-## ⚠️ CRITICAL: Cluster Rules
-
-Xatu data is split across **TWO clusters** with **DIFFERENT syntax**:
-
-| Cluster | Contains | Table Syntax | Network Filter |
-|---------|----------|--------------|----------------|
-| **xatu** | Raw events | ` + "`FROM table_name`" + ` | ` + "`WHERE meta_network_name = 'mainnet'`" + ` |
-| **xatu-cbt** | Pre-aggregated | ` + "`FROM mainnet.table_name`" + ` | Database prefix IS the filter |
-
-**Always filter by partition column** (usually ` + "`slot_start_date_time`" + `) to avoid timeouts.
-
-## Canonical vs Head Data
-
-- **Canonical** = finalized (no reorgs) → use for historical analysis
-- **Head** = latest (may reorg) → use for real-time monitoring
-- Tables have variants: ` + "`fct_block_canonical`" + ` vs ` + "`fct_block_head`" + `
 `
 
 // gettingStartedFooter contains static tips.
@@ -48,40 +34,53 @@ const gettingStartedFooter = `
 
 - **Reuse session_id** from tool responses for faster execution and file persistence
 - Files in ` + "`/workspace/`" + ` persist across calls; Python variables do NOT
-- Use ` + "`storage.upload()`" + ` for permanent URLs (see ` + "`python://xatu`" + ` for API details)
+- Use ` + "`storage.upload()`" + ` for permanent URLs (see ` + "`python://ethpandaops`" + ` for API details)
 `
 
-// RegisterGettingStartedResources registers the xatu://getting-started resource.
+// RegisterGettingStartedResources registers the mcp://getting-started
+// resource.
 func RegisterGettingStartedResources(
 	log logrus.FieldLogger,
 	reg Registry,
 	toolReg ToolLister,
+	pluginReg *plugin.Registry,
 ) {
 	log = log.WithField("resource", "getting_started")
 
 	reg.RegisterStatic(StaticResource{
 		Resource: mcp.NewResource(
-			"xatu://getting-started",
-			"Xatu Getting Started Guide",
-			mcp.WithResourceDescription("Essential guide for querying Ethereum data with Xatu - read this first!"),
+			"mcp://getting-started",
+			"Getting Started Guide",
+			mcp.WithResourceDescription("Essential guide for querying data - read this first!"),
 			mcp.WithMIMEType("text/markdown"),
 			mcp.WithAnnotations([]mcp.Role{mcp.RoleAssistant}, 1.0),
 		),
-		Handler: createGettingStartedHandler(reg, toolReg),
+		Handler: createGettingStartedHandler(reg, toolReg, pluginReg),
 	})
 
 	log.Debug("Registered getting-started resource")
 }
 
-// createGettingStartedHandler creates a handler that dynamically builds content.
-func createGettingStartedHandler(reg Registry, toolReg ToolLister) ReadHandler {
+// createGettingStartedHandler creates a handler that dynamically
+// builds content from platform resources and plugin snippets.
+func createGettingStartedHandler(
+	reg Registry,
+	toolReg ToolLister,
+	pluginReg *plugin.Registry,
+) ReadHandler {
 	return func(_ context.Context, _ string) (string, error) {
 		var sb strings.Builder
 
-		// Write header with workflow and critical requirements
+		// Write header with workflow and critical requirements.
 		sb.WriteString(gettingStartedHeader)
 
-		// Dynamically list tools
+		// Include plugin-specific getting-started snippets.
+		snippets := pluginReg.GettingStartedSnippets()
+		if snippets != "" {
+			sb.WriteString(snippets)
+		}
+
+		// Dynamically list tools.
 		sb.WriteString("## Available Tools\n\n")
 
 		tools := toolReg.List()
@@ -90,48 +89,36 @@ func createGettingStartedHandler(reg Registry, toolReg ToolLister) ReadHandler {
 		})
 
 		for _, tool := range tools {
-			// Get first line of description
+			// Get first line of description.
 			desc := tool.Description
 			if idx := strings.Index(desc, "\n"); idx > 0 {
 				desc = desc[:idx]
 			}
 
-			// Trim any leading emoji or special chars for cleaner output
 			desc = strings.TrimSpace(desc)
-			if strings.HasPrefix(desc, "⚠️") {
-				// Skip warning lines, get next meaningful line
-				lines := strings.Split(tool.Description, "\n")
-				for _, line := range lines {
-					line = strings.TrimSpace(line)
-					if line != "" && !strings.HasPrefix(line, "⚠️") {
-						desc = line
-						break
-					}
-				}
-			}
 
 			sb.WriteString(fmt.Sprintf("- **%s**: %s\n", tool.Name, desc))
 		}
 
-		// Dynamically list resources
+		// Dynamically list resources.
 		sb.WriteString("\n## Available Resources\n\n")
 
-		// Static resources
+		// Static resources.
 		staticResources := reg.ListStatic()
 		sort.Slice(staticResources, func(i, j int) bool {
 			return staticResources[i].URI < staticResources[j].URI
 		})
 
 		for _, res := range staticResources {
-			// Skip self-reference
-			if res.URI == "xatu://getting-started" {
+			// Skip self-reference.
+			if res.URI == "mcp://getting-started" {
 				continue
 			}
 
 			sb.WriteString(fmt.Sprintf("- `%s` - %s\n", res.URI, res.Name))
 		}
 
-		// Template resources
+		// Template resources.
 		templates := reg.ListTemplates()
 		if len(templates) > 0 {
 			sb.WriteString("\n**Templates:**\n")
@@ -145,7 +132,7 @@ func createGettingStartedHandler(reg Registry, toolReg ToolLister) ReadHandler {
 			}
 		}
 
-		// Write footer with tips
+		// Write footer with tips.
 		sb.WriteString(gettingStartedFooter)
 
 		return sb.String(), nil

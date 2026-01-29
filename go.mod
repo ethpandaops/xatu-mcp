@@ -1,4 +1,4 @@
-module github.com/ethpandaops/xatu-mcp
+module github.com/ethpandaops/mcp
 
 go 1.24.1
 

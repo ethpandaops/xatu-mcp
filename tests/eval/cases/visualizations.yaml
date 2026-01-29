@@ -1,11 +1,11 @@
-# Visualization test cases for xatu-mcp evaluation
+# Visualization test cases for ethpandaops-mcp evaluation
 # These test chart generation and visualization output
 
 - id: block_time_histogram
   description: Generate a histogram of block times
   input: "Create a histogram showing the distribution of block arrival times for the last 1000 blocks on mainnet."
   expected_tools:
-    - mcp__xatu__execute_python
+    - mcp__ethpandaops__execute_python
   metrics:
     tool_correctness: 0.8
     task_completion: 0.7

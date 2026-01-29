@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethpandaops/xatu-mcp/pkg/config"
+	"github.com/ethpandaops/mcp/pkg/config"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 )

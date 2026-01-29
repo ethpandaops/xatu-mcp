@@ -1,4 +1,4 @@
-# Langfuse v3 self-hosted for xatu-mcp eval trace viewing
+# Langfuse v3 self-hosted for ethpandaops-mcp eval trace viewing
 # Start with: docker compose -f docker-compose.langfuse.yaml up -d
 # Access UI at: http://localhost:31700
 
@@ -20,7 +20,7 @@ services:
     environment: &langfuse-env
       DATABASE_URL: postgresql://langfuse:langfuse@postgres:5432/langfuse
       NEXTAUTH_URL: http://localhost:31700
-      SALT: ${LANGFUSE_SALT:-xatu-mcp-eval-salt-change-me}
+      SALT: ${LANGFUSE_SALT:-mcp-eval-salt-change-me}
       ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
       TELEMETRY_ENABLED: "false"
       LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "true"
@@ -59,15 +59,15 @@ services:
       - "31700:3000"
     environment:
       <<: *langfuse-env
-      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-xatu-mcp-eval-secret-change-me}
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-mcp-eval-secret-change-me}
       # Auto-provision org, project, and API keys (no manual setup needed)
-      LANGFUSE_INIT_ORG_ID: xatu-org
-      LANGFUSE_INIT_ORG_NAME: xatu-mcp
-      LANGFUSE_INIT_PROJECT_ID: xatu-eval
-      LANGFUSE_INIT_PROJECT_NAME: xatu-eval
-      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: pk-lf-xatu-eval-local
-      LANGFUSE_INIT_PROJECT_SECRET_KEY: sk-lf-xatu-eval-local
-      LANGFUSE_INIT_USER_EMAIL: admin@xatu.local
+      LANGFUSE_INIT_ORG_ID: ethpandaops-org
+      LANGFUSE_INIT_ORG_NAME: ethpandaops-mcp
+      LANGFUSE_INIT_PROJECT_ID: mcp-eval
+      LANGFUSE_INIT_PROJECT_NAME: mcp-eval
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: pk-lf-mcp-eval-local
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: sk-lf-mcp-eval-local
+      LANGFUSE_INIT_USER_EMAIL: admin@mcp.local
       LANGFUSE_INIT_USER_NAME: admin
       LANGFUSE_INIT_USER_PASSWORD: adminadmin
 

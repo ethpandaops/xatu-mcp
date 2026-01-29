@@ -15,12 +15,12 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev
 GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME ?= $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 LDFLAGS := -s -w \
-	-X github.com/ethpandaops/xatu-mcp/internal/version.Version=$(VERSION) \
-	-X github.com/ethpandaops/xatu-mcp/internal/version.GitCommit=$(GIT_COMMIT) \
-	-X github.com/ethpandaops/xatu-mcp/internal/version.BuildTime=$(BUILD_TIME)
+	-X github.com/ethpandaops/mcp/internal/version.Version=$(VERSION) \
+	-X github.com/ethpandaops/mcp/internal/version.GitCommit=$(GIT_COMMIT) \
+	-X github.com/ethpandaops/mcp/internal/version.BuildTime=$(BUILD_TIME)
 
 # Docker variables
-DOCKER_IMAGE ?= ethpandaops/xatu-mcp
+DOCKER_IMAGE ?= ethpandaops/mcp
 DOCKER_TAG ?= $(VERSION)
 
 # Go variables
@@ -30,10 +30,10 @@ help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 build: ## Build the binary
-	go build -ldflags "$(LDFLAGS)" -o xatu-mcp ./cmd/xatu-mcp
+	go build -ldflags "$(LDFLAGS)" -o mcp ./cmd/mcp
 
 build-linux: ## Build for Linux (amd64)
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o xatu-mcp-linux-amd64 ./cmd/xatu-mcp
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o mcp-linux-amd64 ./cmd/mcp
 
 test: ## Run tests
 	go test -race -v ./...
@@ -60,7 +60,7 @@ tidy: ## Run go mod tidy
 	go mod tidy
 
 clean: ## Clean build artifacts
-	rm -f xatu-mcp xatu-mcp-linux-amd64
+	rm -f mcp mcp-linux-amd64
 	rm -f coverage.out coverage.html
 
 docker: ## Build Docker image
@@ -77,21 +77,21 @@ docker-push: docker ## Push Docker image
 	docker push $(DOCKER_IMAGE):latest
 
 docker-sandbox: ## Build sandbox Docker image
-	docker build -t xatu-mcp-sandbox:latest ./sandbox
+	docker build -t mcp-sandbox:latest -f sandbox/Dockerfile .
 
 test-sandbox: build docker-sandbox ## Test sandbox execution (requires .env)
 	@if [ -f .env ]; then \
-		set -a && . .env && set +a && ./xatu-mcp test; \
+		set -a && . .env && set +a && ./mcp test; \
 	else \
 		echo "Error: .env file not found. Copy .env.example and configure it."; \
 		exit 1; \
 	fi
 
 run: build download-models ## Run the server with stdio transport
-	./xatu-mcp serve
+	./mcp serve
 
 run-sse: build ## Run the server with SSE transport
-	./xatu-mcp serve --transport sse --port 2480
+	./mcp serve --transport sse --port 2480
 
 run-docker: docker ## Run with docker-compose
 	docker-compose up -d
@@ -103,7 +103,7 @@ logs: ## View docker-compose logs
 	docker-compose logs -f mcp-server
 
 install: build ## Install binary to GOBIN
-	cp xatu-mcp $(GOBIN)/xatu-mcp
+	cp mcp $(GOBIN)/mcp
 
 version: ## Show version info
 	@echo "Version:    $(VERSION)"

@@ -14,7 +14,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/ethpandaops/xatu-mcp/pkg/config"
+	"github.com/ethpandaops/mcp/pkg/config"
 )
 
 // Error sentinels for GitHub OAuth operations.

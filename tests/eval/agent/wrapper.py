@@ -1,4 +1,4 @@
-"""Claude Agent SDK wrapper for xatu-mcp evaluation with Langfuse tracing."""
+"""Claude Agent SDK wrapper for ethpandaops-mcp evaluation with Langfuse tracing."""
 
 from __future__ import annotations
 
@@ -70,8 +70,8 @@ class ExecutionResult:
     error_message: str | None = None
 
 
-class XatuAgent:
-    """Wrapper around Claude Agent SDK for xatu-mcp evaluation."""
+class MCPAgent:
+    """Wrapper around Claude Agent SDK for ethpandaops-mcp evaluation."""
 
     def __init__(self, settings: EvalSettings) -> None:
         self.settings = settings
@@ -215,7 +215,7 @@ class XatuAgent:
 
         # Build options with optional restrictions
         # When restrict_to_mcp_tools is enabled, we disallow filesystem/codebase tools
-        # The agent will get context from the xatu://getting-started resource and tool descriptions
+        # The agent will get context from the mcp://getting-started resource and tool descriptions
         disallowed = DISALLOWED_TOOLS if self.settings.restrict_to_mcp_tools else []
 
         options = ClaudeAgentOptions(
@@ -224,14 +224,14 @@ class XatuAgent:
             max_turns=self.settings.max_turns,
             disallowed_tools=disallowed,
             mcp_servers={
-                "xatu": {
+                "ethpandaops": {
                     "type": "sse",
-                    "url": f"{self.settings.xatu_mcp_url}/sse",
+                    "url": f"{self.settings.mcp_url}/sse",
                 }
             },
             allowed_tools=[
-                "mcp__xatu__execute_python",
-                "mcp__xatu__search_examples",
+                "mcp__ethpandaops__execute_python",
+                "mcp__ethpandaops__search_examples",
             ],
             hooks={
                 "PreToolUse": [HookMatcher(hooks=[self._trace_pre_tool])],
@@ -328,7 +328,7 @@ class XatuAgent:
         # Create the root span for this execution
         with self._langfuse.start_as_current_observation(
             trace_context=trace_context,
-            name=test_id or "xatu-eval",
+            name=test_id or "mcp-eval",
             as_type="span",
             input={"prompt": prompt},
             metadata={

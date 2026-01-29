@@ -1,4 +1,4 @@
-"""Test case loading utilities for xatu-mcp evaluation."""
+"""Test case loading utilities for ethpandaops-mcp evaluation."""
 
 from cases.loader import TestCase, MultiStepTestCase, load_test_cases, load_multi_step_cases
 

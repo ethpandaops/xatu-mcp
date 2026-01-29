@@ -1,1 +1,1 @@
-"""Test modules for xatu-mcp evaluation."""
+"""Test modules for ethpandaops-mcp evaluation."""

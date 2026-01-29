@@ -1,4 +1,4 @@
-"""Pydantic settings for xatu-mcp evaluation harness."""
+"""Pydantic settings for ethpandaops-mcp evaluation harness."""
 
 from pathlib import Path
 from typing import Literal
@@ -12,10 +12,10 @@ DEFAULT_EVALUATOR_MODEL = "google/gemini-3-flash-preview"
 
 
 class EvalSettings(BaseSettings):
-    """Configuration for the xatu-mcp evaluation harness."""
+    """Configuration for the ethpandaops-mcp evaluation harness."""
 
     model_config = SettingsConfigDict(
-        env_prefix="XATU_EVAL_",
+        env_prefix="MCP_EVAL_",
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
@@ -27,10 +27,10 @@ class EvalSettings(BaseSettings):
         description="Claude model to use for evaluation",
     )
 
-    # xatu-mcp connection (external server, auth disabled)
-    xatu_mcp_url: str = Field(
+    # ethpandaops-mcp connection (external server, auth disabled)
+    mcp_url: str = Field(
         default="http://localhost:2480",
-        description="URL of the xatu-mcp server",
+        description="URL of the ethpandaops-mcp server",
     )
 
     # Evaluation settings
@@ -112,11 +112,11 @@ class EvalSettings(BaseSettings):
         description="Langfuse server URL (self-hosted)",
     )
     langfuse_public_key: str = Field(
-        default="pk-lf-xatu-eval-local",
+        default="pk-lf-mcp-eval-local",
         description="Langfuse project public key (default works with docker-compose)",
     )
     langfuse_secret_key: str = Field(
-        default="sk-lf-xatu-eval-local",
+        default="sk-lf-mcp-eval-local",
         description="Langfuse project secret key (default works with docker-compose)",
     )
 

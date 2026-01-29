@@ -4,7 +4,7 @@ This module provides functions to query Prometheus instances directly
 using the HTTP API.
 
 Example:
-    from xatu import prometheus
+    from ethpandaops import prometheus
 
     # List available Prometheus instances
     instances = prometheus.list_datasources()
@@ -31,7 +31,7 @@ from typing import Any
 
 import httpx
 
-from ._time import parse_duration
+from ethpandaops._time import parse_duration
 
 logger = logging.getLogger(__name__)
 
@@ -60,16 +60,16 @@ def _load_instances() -> None:
     if _INSTANCES is not None:
         return
 
-    raw = os.environ.get("XATU_PROMETHEUS_CONFIGS", "")
+    raw = os.environ.get("ETHPANDAOPS_PROMETHEUS_CONFIGS", "")
     if not raw:
         raise ValueError(
-            "Prometheus not configured. Set XATU_PROMETHEUS_CONFIGS environment variable."
+            "Prometheus not configured. Set ETHPANDAOPS_PROMETHEUS_CONFIGS environment variable."
         )
 
     try:
         configs = json.loads(raw)
     except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid XATU_PROMETHEUS_CONFIGS JSON: {e}") from e
+        raise ValueError(f"Invalid ETHPANDAOPS_PROMETHEUS_CONFIGS JSON: {e}") from e
 
     _INSTANCES = {}
     for cfg in configs:

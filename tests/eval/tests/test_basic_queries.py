@@ -1,4 +1,4 @@
-"""Tests for basic single-turn queries against xatu-mcp."""
+"""Tests for basic single-turn queries against ethpandaops-mcp."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from metrics.datasource import DataSourceMetric
 from metrics.resource_discovery import ResourceDiscoveryMetric
 
 if TYPE_CHECKING:
-    from agent.wrapper import XatuAgent
+    from agent.wrapper import MCPAgent
     from config.settings import EvalSettings
 
 
@@ -42,7 +42,7 @@ def _get_test_case(test_id: str):
 @pytest.mark.parametrize("test_id", _get_test_ids())
 async def test_basic_query(
     test_id: str,
-    agent: XatuAgent,
+    agent: MCPAgent,
     eval_settings: EvalSettings,
     cost_tracker: CostTracker,
     trace_recorder: TraceRecorder,
@@ -51,7 +51,7 @@ async def test_basic_query(
 
     Args:
         test_id: ID of the test case to run.
-        agent: The XatuAgent instance.
+        agent: The MCPAgent instance.
         eval_settings: Evaluation settings.
         cost_tracker: Cost tracker for aggregating costs.
         trace_recorder: Trace recorder for saving detailed traces.
@@ -193,7 +193,7 @@ async def test_basic_query(
 
 @pytest.mark.asyncio
 async def test_basic_query_with_examples_search(
-    agent: XatuAgent,
+    agent: MCPAgent,
     eval_settings: EvalSettings,
 ) -> None:
     """Test that agent can use search_examples tool effectively."""

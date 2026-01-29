@@ -7,12 +7,17 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/ethpandaops/xatu-mcp/pkg/auth"
-	"github.com/ethpandaops/xatu-mcp/pkg/config"
-	"github.com/ethpandaops/xatu-mcp/pkg/embedding"
-	"github.com/ethpandaops/xatu-mcp/pkg/resource"
-	"github.com/ethpandaops/xatu-mcp/pkg/sandbox"
-	"github.com/ethpandaops/xatu-mcp/pkg/tool"
+	"github.com/ethpandaops/mcp/pkg/auth"
+	"github.com/ethpandaops/mcp/pkg/config"
+	"github.com/ethpandaops/mcp/pkg/embedding"
+	"github.com/ethpandaops/mcp/pkg/plugin"
+	"github.com/ethpandaops/mcp/pkg/resource"
+	"github.com/ethpandaops/mcp/pkg/sandbox"
+	"github.com/ethpandaops/mcp/pkg/tool"
+
+	clickhouseplugin "github.com/ethpandaops/mcp/plugins/clickhouse"
+	lokiplugin "github.com/ethpandaops/mcp/plugins/loki"
+	prometheusplugin "github.com/ethpandaops/mcp/plugins/prometheus"
 )
 
 // Dependencies contains all the services required to run the MCP server.
@@ -41,27 +46,42 @@ func NewBuilder(log logrus.FieldLogger, cfg *config.Config) *Builder {
 
 // Build constructs all dependencies and returns the server service.
 func (b *Builder) Build(ctx context.Context) (Service, error) {
-	b.log.Info("Building xatu-mcp server dependencies")
+	b.log.Info("Building MCP server dependencies")
 
-	// Create sandbox service
+	// Build and initialize plugin registry.
+	pluginReg, err := b.buildPluginRegistry()
+	if err != nil {
+		return nil, fmt.Errorf("building plugin registry: %w", err)
+	}
+
+	// Create sandbox service.
 	sandboxSvc, err := b.buildSandbox()
 	if err != nil {
 		return nil, fmt.Errorf("building sandbox: %w", err)
 	}
 
-	// Start the sandbox service to initialize Docker client
+	// Start the sandbox service to initialize Docker client.
 	if err := sandboxSvc.Start(ctx); err != nil {
 		return nil, fmt.Errorf("starting sandbox: %w", err)
 	}
 
 	b.log.WithField("backend", sandboxSvc.Name()).Info("Sandbox service started")
 
-	// Create cartographoor client for network discovery
+	// Start all initialized plugins (e.g., schema discovery).
+	if err := pluginReg.StartAll(ctx); err != nil {
+		_ = sandboxSvc.Stop(ctx)
+
+		return nil, fmt.Errorf("starting plugins: %w", err)
+	}
+
+	b.log.Info("All plugins started")
+
+	// Create cartographoor client for network discovery.
 	cartographoorClient := b.buildCartographoor()
 
-	// Start the cartographoor client to fetch initial network data
+	// Start the cartographoor client to fetch initial network data.
 	if err := cartographoorClient.Start(ctx); err != nil {
-		// Clean up on failure
+		pluginReg.StopAll(ctx)
 		_ = sandboxSvc.Stop(ctx)
 
 		return nil, fmt.Errorf("starting cartographoor client: %w", err)
@@ -69,45 +89,21 @@ func (b *Builder) Build(ctx context.Context) (Service, error) {
 
 	b.log.Info("Cartographoor client started")
 
-	// Create ClickHouse schema client for table discovery (optional)
-	schemaClient := b.buildClickHouseSchema()
-
-	// Start the schema client if configured
-	if schemaClient != nil {
-		if err := schemaClient.Start(ctx); err != nil {
-			// Clean up on failure
-			_ = sandboxSvc.Stop(ctx)
-			_ = cartographoorClient.Stop()
-
-			return nil, fmt.Errorf("starting clickhouse schema client: %w", err)
-		}
-
-		b.log.Info("ClickHouse schema client started")
-	}
-
-	// Create auth service
+	// Create auth service.
 	authSvc, err := b.buildAuth()
 	if err != nil {
-		// Clean up on failure
-		_ = sandboxSvc.Stop(ctx)
 		_ = cartographoorClient.Stop()
-
-		if schemaClient != nil {
-			_ = schemaClient.Stop()
-		}
+		pluginReg.StopAll(ctx)
+		_ = sandboxSvc.Stop(ctx)
 
 		return nil, fmt.Errorf("building auth: %w", err)
 	}
 
-	// Start the auth service
+	// Start the auth service.
 	if err := authSvc.Start(ctx); err != nil {
-		// Clean up on failure
-		_ = sandboxSvc.Stop(ctx)
 		_ = cartographoorClient.Stop()
-
-		if schemaClient != nil {
-			_ = schemaClient.Stop()
-		}
+		pluginReg.StopAll(ctx)
+		_ = sandboxSvc.Stop(ctx)
 
 		return nil, fmt.Errorf("starting auth: %w", err)
 	}
@@ -116,16 +112,14 @@ func (b *Builder) Build(ctx context.Context) (Service, error) {
 		b.log.Info("Auth service started")
 	}
 
-	// Create embedding model and example index for semantic search
-	exampleIndex, err := b.buildExampleIndex()
+	// Create embedding model and example index for semantic search.
+	exampleIndex, err := b.buildExampleIndex(pluginReg)
 	if err != nil {
-		// Clean up on failure
-		_ = sandboxSvc.Stop(ctx)
-		_ = cartographoorClient.Stop()
-		if schemaClient != nil {
-			_ = schemaClient.Stop()
-		}
 		_ = authSvc.Stop()
+		_ = cartographoorClient.Stop()
+		pluginReg.StopAll(ctx)
+		_ = sandboxSvc.Stop(ctx)
+
 		return nil, fmt.Errorf("building example index: %w", err)
 	}
 
@@ -133,13 +127,13 @@ func (b *Builder) Build(ctx context.Context) (Service, error) {
 		b.log.Info("Semantic search example index built")
 	}
 
-	// Create tool registry and register tools
-	toolReg := b.buildToolRegistry(sandboxSvc, exampleIndex)
+	// Create tool registry and register tools.
+	toolReg := b.buildToolRegistry(sandboxSvc, exampleIndex, pluginReg)
 
-	// Create resource registry and register resources
-	resourceReg := b.buildResourceRegistry(cartographoorClient, schemaClient, toolReg)
+	// Create resource registry and register resources.
+	resourceReg := b.buildResourceRegistry(cartographoorClient, pluginReg, toolReg)
 
-	// Create and return the server service
+	// Create and return the server service.
 	return NewService(
 		b.log,
 		b.cfg.Server,
@@ -149,6 +143,39 @@ func (b *Builder) Build(ctx context.Context) (Service, error) {
 		sandboxSvc,
 		authSvc,
 	), nil
+}
+
+// buildPluginRegistry creates the plugin registry, registers all compiled-in
+// plugins, and initializes those with config.
+func (b *Builder) buildPluginRegistry() (*plugin.Registry, error) {
+	reg := plugin.NewRegistry(b.log)
+
+	// Register all compiled-in plugins.
+	reg.Add(clickhouseplugin.New())
+	reg.Add(prometheusplugin.New())
+	reg.Add(lokiplugin.New())
+
+	// Initialize plugins that have config.
+	for _, name := range reg.All() {
+		rawYAML, err := b.cfg.PluginConfigYAML(name)
+		if err != nil {
+			return nil, fmt.Errorf("getting config for plugin %q: %w", name, err)
+		}
+
+		if rawYAML == nil {
+			b.log.WithField("plugin", name).Debug("Plugin not configured, skipping")
+
+			continue
+		}
+
+		if err := reg.InitPlugin(name, rawYAML); err != nil {
+			return nil, fmt.Errorf("initializing plugin %q: %w", name, err)
+		}
+	}
+
+	b.log.WithField("initialized_count", len(reg.Initialized())).Info("Plugin registry built")
+
+	return reg, nil
 }
 
 // buildSandbox creates the sandbox service.
@@ -162,15 +189,19 @@ func (b *Builder) buildAuth() (auth.SimpleService, error) {
 }
 
 // buildToolRegistry creates and populates the tool registry.
-func (b *Builder) buildToolRegistry(sandboxSvc sandbox.Service, exampleIndex *resource.ExampleIndex) tool.Registry {
+func (b *Builder) buildToolRegistry(
+	sandboxSvc sandbox.Service,
+	exampleIndex *resource.ExampleIndex,
+	pluginReg *plugin.Registry,
+) tool.Registry {
 	reg := tool.NewRegistry(b.log)
 
-	// Register execute_python tool
-	reg.Register(tool.NewExecutePythonTool(b.log, sandboxSvc, b.cfg))
+	// Register execute_python tool.
+	reg.Register(tool.NewExecutePythonTool(b.log, sandboxSvc, b.cfg, pluginReg))
 
-	// Register search_examples tool (requires example index)
+	// Register search_examples tool (requires example index).
 	if exampleIndex != nil {
-		reg.Register(tool.NewSearchExamplesTool(b.log, exampleIndex))
+		reg.Register(tool.NewSearchExamplesTool(b.log, exampleIndex, pluginReg))
 	}
 
 	b.log.WithField("tool_count", len(reg.List())).Info("Tool registry built")
@@ -187,43 +218,17 @@ func (b *Builder) buildCartographoor() resource.CartographoorClient {
 	})
 }
 
-// buildClickHouseSchema creates the ClickHouse schema client for table discovery.
-// Returns nil if schema discovery is not configured.
-func (b *Builder) buildClickHouseSchema() resource.ClickHouseSchemaClient {
-	if !b.cfg.SchemaDiscovery.IsEnabled() {
-		b.log.Info("Schema discovery is disabled (no datasources configured)")
-
-		return nil
-	}
-
-	// Convert config datasource mappings to resource package format
-	datasources := make([]resource.SchemaDiscoveryDatasource, len(b.cfg.SchemaDiscovery.Datasources))
-	for i, ds := range b.cfg.SchemaDiscovery.Datasources {
-		datasources[i] = resource.SchemaDiscoveryDatasource{
-			Name:    ds.Name,
-			Cluster: ds.Cluster,
-		}
-	}
-
-	return resource.NewClickHouseSchemaClient(b.log, resource.ClickHouseSchemaConfig{
-		RefreshInterval: b.cfg.SchemaDiscovery.RefreshInterval,
-		QueryTimeout:    resource.DefaultSchemaQueryTimeout,
-		Datasources:     datasources,
-	}, b.cfg.ClickHouse)
-}
-
 // buildExampleIndex creates the semantic search index for examples.
 // Returns nil if semantic search is disabled or model is not available.
-func (b *Builder) buildExampleIndex() (*resource.ExampleIndex, error) {
+func (b *Builder) buildExampleIndex(pluginReg *plugin.Registry) (*resource.ExampleIndex, error) {
 	cfg := b.cfg.SemanticSearch
-	if !cfg.IsEnabled() {
-		b.log.Info("Semantic search is disabled")
-		return nil, nil
+	if cfg.ModelPath == "" {
+		return nil, fmt.Errorf("semantic_search.model_path is required")
 	}
 
-	// Check if model file exists
+	// Check if model file exists.
 	if _, err := os.Stat(cfg.ModelPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("embedding model not found at %s (run 'make download-model' to fetch it)", cfg.ModelPath)
+		return nil, fmt.Errorf("embedding model not found at %s (run 'make download-models' to fetch it)", cfg.ModelPath)
 	}
 
 	embedder, err := embedding.New(cfg.ModelPath, cfg.GPULayers)
@@ -231,9 +236,10 @@ func (b *Builder) buildExampleIndex() (*resource.ExampleIndex, error) {
 		return nil, fmt.Errorf("creating embedder: %w", err)
 	}
 
-	index, err := resource.NewExampleIndex(b.log, embedder, resource.GetQueryExamples())
+	index, err := resource.NewExampleIndex(b.log, embedder, resource.GetQueryExamples(pluginReg))
 	if err != nil {
 		_ = embedder.Close()
+
 		return nil, fmt.Errorf("building example index: %w", err)
 	}
 
@@ -243,33 +249,36 @@ func (b *Builder) buildExampleIndex() (*resource.ExampleIndex, error) {
 // buildResourceRegistry creates and populates the resource registry.
 func (b *Builder) buildResourceRegistry(
 	cartographoorClient resource.CartographoorClient,
-	schemaClient resource.ClickHouseSchemaClient,
+	pluginReg *plugin.Registry,
 	toolReg tool.Registry,
 ) resource.Registry {
 	reg := resource.NewRegistry(b.log)
 
-	// Register datasources resources
-	resource.RegisterDatasourcesResources(b.log, reg, b.cfg.ClickHouse, b.cfg.Prometheus, b.cfg.Loki)
+	// Register datasources resources (from plugin registry).
+	resource.RegisterDatasourcesResources(b.log, reg, pluginReg)
 
-	// Register examples resources
-	resource.RegisterExamplesResources(b.log, reg)
+	// Register examples resources (from plugin registry).
+	resource.RegisterExamplesResources(b.log, reg, pluginReg)
 
-	// Register networks resources
+	// Register networks resources.
 	resource.RegisterNetworksResources(b.log, reg, cartographoorClient)
 
-	// Register Python library resources
-	resource.RegisterPythonResources(b.log, reg)
+	// Register Python library API resources (from plugin registry).
+	resource.RegisterAPIResources(b.log, reg, pluginReg)
 
-	// Register getting-started resource (needs tool registry for dynamic content)
-	resource.RegisterGettingStartedResources(b.log, reg, toolReg)
+	// Register getting-started resource.
+	resource.RegisterGettingStartedResources(b.log, reg, toolReg, pluginReg)
 
-	// Register ClickHouse schema resources if schema discovery is enabled
-	if schemaClient != nil {
-		resource.RegisterClickHouseSchemaResources(b.log, reg, schemaClient)
+	// Register plugin-specific resources (e.g., clickhouse://tables).
+	for _, p := range pluginReg.Initialized() {
+		if err := p.RegisterResources(b.log, reg); err != nil {
+			b.log.WithError(err).WithField("plugin", p.Name()).Warn("Failed to register plugin resources")
+		}
 	}
 
 	staticCount := len(reg.ListStatic())
 	templateCount := len(reg.ListTemplates())
+
 	b.log.WithFields(logrus.Fields{
 		"static_count":   staticCount,
 		"template_count": templateCount,

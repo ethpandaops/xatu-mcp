@@ -1,4 +1,4 @@
-package resource
+package clickhouse
 
 import (
 	"context"
@@ -10,6 +10,9 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/sirupsen/logrus"
+
+	"github.com/ethpandaops/mcp/pkg/plugin"
+	"github.com/ethpandaops/mcp/pkg/types"
 )
 
 // TablesListResponse is the response for clickhouse://tables.
@@ -40,16 +43,16 @@ type TableDetailResponse struct {
 	Cluster string       `json:"cluster"`
 }
 
-// RegisterClickHouseSchemaResources registers ClickHouse schema resources with the registry.
-func RegisterClickHouseSchemaResources(
+// RegisterSchemaResources registers ClickHouse schema resources with the registry.
+func RegisterSchemaResources(
 	log logrus.FieldLogger,
-	reg Registry,
+	reg plugin.ResourceRegistry,
 	client ClickHouseSchemaClient,
 ) {
 	log = log.WithField("resource", "clickhouse_schema")
 
 	// clickhouse://tables - List all tables across clusters
-	reg.RegisterStatic(StaticResource{
+	reg.RegisterStatic(types.StaticResource{
 		Resource: mcp.NewResource(
 			"clickhouse://tables",
 			"ClickHouse Tables",
@@ -69,7 +72,7 @@ func RegisterClickHouseSchemaResources(
 		mcp.WithTemplateAnnotations([]mcp.Role{mcp.RoleAssistant}, 0.6),
 	)
 
-	reg.RegisterTemplate(TemplateResource{
+	reg.RegisterTemplate(types.TemplateResource{
 		Template: template,
 		Pattern:  regexp.MustCompile(`^clickhouse://tables/(.+)$`),
 		Handler:  createTableDetailHandler(log, client),
@@ -79,7 +82,7 @@ func RegisterClickHouseSchemaResources(
 }
 
 // createTablesListHandler creates a handler for the clickhouse://tables resource.
-func createTablesListHandler(client ClickHouseSchemaClient) ReadHandler {
+func createTablesListHandler(client ClickHouseSchemaClient) types.ReadHandler {
 	return func(_ context.Context, _ string) (string, error) {
 		allTables := client.GetAllTables()
 
@@ -130,7 +133,7 @@ func createTablesListHandler(client ClickHouseSchemaClient) ReadHandler {
 }
 
 // createTableDetailHandler creates a handler for the clickhouse://tables/{table_name} resource.
-func createTableDetailHandler(log logrus.FieldLogger, client ClickHouseSchemaClient) ReadHandler {
+func createTableDetailHandler(log logrus.FieldLogger, client ClickHouseSchemaClient) types.ReadHandler {
 	return func(_ context.Context, uri string) (string, error) {
 		// Extract table name from URI
 		tableName := extractTableName(uri)

@@ -1,12 +1,12 @@
-// Package observability provides metrics and tracing capabilities for xatu-mcp.
+// Package observability provides metrics capabilities for ethpandaops-mcp.
 package observability
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// Metrics namespace for all xatu-mcp metrics.
-const metricsNamespace = "xatu_mcp"
+// Metrics namespace for all ethpandaops-mcp metrics.
+const metricsNamespace = "ethpandaops_mcp"
 
 // Tool call metrics.
 var (

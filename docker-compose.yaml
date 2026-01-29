@@ -1,4 +1,4 @@
-# Xatu MCP Server - Docker Compose Configuration
+# ethpandaops MCP Server - Docker Compose Configuration
 #
 # Usage:
 #   docker-compose up -d              # Start all services
@@ -18,13 +18,14 @@ services:
   # This runs "true" and exits immediately - we just need the image built
   sandbox-builder:
     build:
-      context: ./sandbox
-    image: xatu-mcp-sandbox:latest
+      context: .
+      dockerfile: sandbox/Dockerfile
+    image: mcp-sandbox:latest
     command: "true"
     restart: "no"
 
   mcp-server:
-    # NOTE: Semantic search requires x86_64. On ARM Macs, it will be disabled.
+    # NOTE: Semantic search requires x86_64. On ARM Macs, use emulation or the server will fail to start.
     # Uncomment below for x86 emulation (slower but enables semantic search):
     # platform: linux/amd64
     build:
@@ -72,11 +73,11 @@ services:
       - S3_ENDPOINT=http://minio:9000
       - S3_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
       - S3_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
-      - S3_PUBLIC_URL=http://localhost:${MINIO_API_PORT:-31400}/xatu-mcp-outputs
+      - S3_PUBLIC_URL=http://localhost:${MINIO_API_PORT:-31400}/mcp-outputs
     volumes:
       - ./config.yaml:/config/config.yaml:ro
       - /var/run/docker.sock:/var/run/docker.sock
-      - /tmp/xatu-mcp-sandbox:/tmp/xatu-mcp-sandbox  # Shared with sandbox containers
+      - /tmp/mcp-sandbox:/tmp/mcp-sandbox  # Shared with sandbox containers
     networks:
       - mcp-external
       - mcp-internal
@@ -120,8 +121,8 @@ services:
     entrypoint: >
       /bin/sh -c "
       mc alias set local http://minio:9000 ${MINIO_ACCESS_KEY:-minioadmin} ${MINIO_SECRET_KEY:-minioadmin};
-      mc mb local/xatu-mcp-outputs --ignore-existing;
-      mc anonymous set download local/xatu-mcp-outputs;
+      mc mb local/mcp-outputs --ignore-existing;
+      mc anonymous set download local/mcp-outputs;
       echo 'Bucket created and configured';
       "
 

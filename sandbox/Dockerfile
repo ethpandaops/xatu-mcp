@@ -1,6 +1,6 @@
-# Xatu MCP Sandbox Container
+# ethpandaops MCP Sandbox Container
 # This container provides a secure execution environment for Python code
-# with the xatu library pre-installed for Ethereum network data analysis.
+# with the ethpandaops library pre-installed for Ethereum network data analysis.
 
 FROM python:3.11-slim
 
@@ -18,13 +18,19 @@ RUN mkdir -p /shared /output && \
     chown sandbox:sandbox /shared /output
 
 # Install Python dependencies
-COPY requirements.txt /tmp/requirements.txt
+COPY sandbox/requirements.txt /tmp/requirements.txt
 RUN uv pip install --system --no-cache -r /tmp/requirements.txt && \
     rm /tmp/requirements.txt
 
-# Install the xatu library
-COPY xatu /opt/xatu
-RUN uv pip install --system --no-cache /opt/xatu && rm -rf /opt/xatu
+# Install the ethpandaops platform library
+COPY sandbox/ethpandaops /opt/ethpandaops-pkg
+
+# Copy plugin Python modules into the package
+COPY plugins/clickhouse/python/clickhouse.py /opt/ethpandaops-pkg/ethpandaops/clickhouse.py
+COPY plugins/prometheus/python/prometheus.py /opt/ethpandaops-pkg/ethpandaops/prometheus.py
+COPY plugins/loki/python/loki.py /opt/ethpandaops-pkg/ethpandaops/loki.py
+
+RUN uv pip install --system --no-cache /opt/ethpandaops-pkg && rm -rf /opt/ethpandaops-pkg
 
 # Set working directory
 WORKDIR /home/sandbox

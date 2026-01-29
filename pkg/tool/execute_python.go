@@ -2,15 +2,15 @@ package tool
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/ethpandaops/xatu-mcp/pkg/auth"
-	"github.com/ethpandaops/xatu-mcp/pkg/config"
-	"github.com/ethpandaops/xatu-mcp/pkg/sandbox"
+	"github.com/ethpandaops/mcp/pkg/auth"
+	"github.com/ethpandaops/mcp/pkg/config"
+	"github.com/ethpandaops/mcp/pkg/plugin"
+	"github.com/ethpandaops/mcp/pkg/sandbox"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/sirupsen/logrus"
 )
@@ -68,7 +68,7 @@ func (c *resourceTipCache) cleanupLocked() {
 
 // resourceTipMessage is shown after the first execution in a session to guide users to MCP resources.
 const resourceTipMessage = `
-TIP: Read xatu://getting-started for cluster rules and workflow guidance.`
+TIP: Read mcp://getting-started for cluster rules and workflow guidance.`
 
 const (
 	// ExecutePythonToolName is the name of the execute_python tool.
@@ -83,9 +83,9 @@ const (
 )
 
 // executePythonDescription is the description of the execute_python tool.
-const executePythonDescription = `Execute Python code with the xatu library for Ethereum data analysis.
+const executePythonDescription = `Execute Python code with the ethpandaops library for Ethereum data analysis.
 
-**⚠️ BEFORE YOUR FIRST QUERY:** Read xatu://getting-started for workflow guidance and critical syntax rules.
+**BEFORE YOUR FIRST QUERY:** Read mcp://getting-started for workflow guidance and critical syntax rules.
 
 Use search_examples tool for query patterns. Reuse session_id from responses.`
 
@@ -94,6 +94,7 @@ func NewExecutePythonTool(
 	log logrus.FieldLogger,
 	sandboxSvc sandbox.Service,
 	cfg *config.Config,
+	pluginReg *plugin.Registry,
 ) Definition {
 	return Definition{
 		Tool: mcp.Tool{
@@ -120,7 +121,7 @@ func NewExecutePythonTool(
 				Required: []string{"code"},
 			},
 		},
-		Handler: newExecutePythonHandler(log, sandboxSvc, cfg),
+		Handler: newExecutePythonHandler(log, sandboxSvc, cfg, pluginReg),
 	}
 }
 
@@ -129,6 +130,7 @@ func newExecutePythonHandler(
 	log logrus.FieldLogger,
 	sandboxSvc sandbox.Service,
 	cfg *config.Config,
+	pluginReg *plugin.Registry,
 ) Handler {
 	handlerLog := log.WithField("tool", ExecutePythonToolName)
 
@@ -171,7 +173,7 @@ func newExecutePythonHandler(
 		}).Info("Executing Python code")
 
 		// Build environment variables for the sandbox.
-		env, err := buildSandboxEnv(cfg)
+		env, err := buildSandboxEnv(cfg, pluginReg)
 		if err != nil {
 			handlerLog.WithError(err).Error("Failed to build sandbox environment")
 
@@ -281,49 +283,24 @@ func formatSize(bytes int64) string {
 }
 
 // buildSandboxEnv creates the environment variables map for the sandbox.
-func buildSandboxEnv(cfg *config.Config) (map[string]string, error) {
-	env := make(map[string]string, 8)
-
-	// ClickHouse configs as JSON array.
-	if len(cfg.ClickHouse) > 0 {
-		chConfigs, err := json.Marshal(cfg.ClickHouse)
-		if err != nil {
-			return nil, fmt.Errorf("marshaling ClickHouse configs: %w", err)
-		}
-
-		env["XATU_CLICKHOUSE_CONFIGS"] = string(chConfigs)
+// It aggregates env vars from all plugins and adds platform S3 vars.
+func buildSandboxEnv(cfg *config.Config, pluginReg *plugin.Registry) (map[string]string, error) {
+	// Get env vars from all plugins.
+	env, err := pluginReg.SandboxEnv()
+	if err != nil {
+		return nil, fmt.Errorf("collecting plugin sandbox env: %w", err)
 	}
 
-	// Prometheus configs as JSON array.
-	if len(cfg.Prometheus) > 0 {
-		promConfigs, err := json.Marshal(cfg.Prometheus)
-		if err != nil {
-			return nil, fmt.Errorf("marshaling Prometheus configs: %w", err)
-		}
-
-		env["XATU_PROMETHEUS_CONFIGS"] = string(promConfigs)
-	}
-
-	// Loki configs as JSON array.
-	if len(cfg.Loki) > 0 {
-		lokiConfigs, err := json.Marshal(cfg.Loki)
-		if err != nil {
-			return nil, fmt.Errorf("marshaling Loki configs: %w", err)
-		}
-
-		env["XATU_LOKI_CONFIGS"] = string(lokiConfigs)
-	}
-
-	// S3 Storage.
+	// S3 Storage (platform-owned).
 	if cfg.Storage != nil {
-		env["XATU_S3_ENDPOINT"] = cfg.Storage.Endpoint
-		env["XATU_S3_ACCESS_KEY"] = cfg.Storage.AccessKey
-		env["XATU_S3_SECRET_KEY"] = cfg.Storage.SecretKey
-		env["XATU_S3_BUCKET"] = cfg.Storage.Bucket
-		env["XATU_S3_REGION"] = cfg.Storage.Region
+		env["ETHPANDAOPS_S3_ENDPOINT"] = cfg.Storage.Endpoint
+		env["ETHPANDAOPS_S3_ACCESS_KEY"] = cfg.Storage.AccessKey
+		env["ETHPANDAOPS_S3_SECRET_KEY"] = cfg.Storage.SecretKey
+		env["ETHPANDAOPS_S3_BUCKET"] = cfg.Storage.Bucket
+		env["ETHPANDAOPS_S3_REGION"] = cfg.Storage.Region
 
 		if cfg.Storage.PublicURLPrefix != "" {
-			env["XATU_S3_PUBLIC_URL_PREFIX"] = cfg.Storage.PublicURLPrefix
+			env["ETHPANDAOPS_S3_PUBLIC_URL_PREFIX"] = cfg.Storage.PublicURLPrefix
 		}
 	}
 

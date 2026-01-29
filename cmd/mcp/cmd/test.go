@@ -2,15 +2,19 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/ethpandaops/xatu-mcp/pkg/config"
-	"github.com/ethpandaops/xatu-mcp/pkg/sandbox"
+	"github.com/ethpandaops/mcp/pkg/config"
+	"github.com/ethpandaops/mcp/pkg/plugin"
+	"github.com/ethpandaops/mcp/pkg/sandbox"
+
+	clickhouseplugin "github.com/ethpandaops/mcp/plugins/clickhouse"
+	lokiplugin "github.com/ethpandaops/mcp/plugins/loki"
+	prometheusplugin "github.com/ethpandaops/mcp/plugins/prometheus"
 )
 
 var testCmd = &cobra.Command{
@@ -32,22 +36,28 @@ func init() {
 	testCmd.Flags().IntVarP(&testTimeout, "timeout", "t", 30, "Execution timeout in seconds")
 }
 
-func runTest(cmd *cobra.Command, args []string) error {
+func runTest(_ *cobra.Command, _ []string) error {
 	ctx := context.Background()
 
-	// Load config
+	// Load config.
 	cfg, err := config.Load(cfgFile)
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	// Create sandbox
+	// Build plugin registry to get env vars.
+	pluginReg, err := buildTestPluginRegistry(cfg)
+	if err != nil {
+		return fmt.Errorf("building plugin registry: %w", err)
+	}
+
+	// Create sandbox.
 	sandboxSvc, err := sandbox.New(cfg.Sandbox, log)
 	if err != nil {
 		return fmt.Errorf("creating sandbox: %w", err)
 	}
 
-	// Start sandbox
+	// Start sandbox.
 	if err := sandboxSvc.Start(ctx); err != nil {
 		return fmt.Errorf("starting sandbox: %w", err)
 	}
@@ -58,7 +68,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	// Determine code to run
+	// Determine code to run.
 	code := testCode
 	if code == "" {
 		code = defaultTestCode()
@@ -68,13 +78,13 @@ func runTest(cmd *cobra.Command, args []string) error {
 	fmt.Println(code)
 	fmt.Println("=== Running... ===")
 
-	// Build environment
-	env, err := buildTestEnv(cfg)
+	// Build environment from plugin registry.
+	env, err := buildTestEnv(cfg, pluginReg)
 	if err != nil {
 		return fmt.Errorf("building test environment: %w", err)
 	}
 
-	// Execute
+	// Execute.
 	result, err := sandboxSvc.Execute(ctx, sandbox.ExecuteRequest{
 		Code:    code,
 		Env:     env,
@@ -84,7 +94,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("execution failed: %w", err)
 	}
 
-	// Print results
+	// Print results.
 	fmt.Println("\n=== STDOUT ===")
 	fmt.Println(result.Stdout)
 
@@ -136,16 +146,16 @@ print(f"  altair: {alt.__version__}")
 print(f"  bokeh: {bokeh.__version__}")
 print(f"  scipy: {scipy.__version__}")
 
-# Test xatu library
-print("\nTesting xatu library...")
-from xatu import clickhouse, prometheus, loki, storage
-print("  xatu library imported successfully")
+# Test ethpandaops library
+print("\nTesting ethpandaops library...")
+from ethpandaops import clickhouse, prometheus, loki, storage
+print("  ethpandaops library imported successfully")
 
 # Test environment variables
 import os
 print("\nEnvironment variables:")
 for key in sorted(os.environ.keys()):
-    if key.startswith("XATU"):
+    if key.startswith("ETHPANDAOPS"):
         value = os.environ[key]
         if "PASSWORD" in key or "SECRET" in key:
             value = "***"
@@ -155,49 +165,50 @@ print("\nAll tests passed!")
 `
 }
 
-func buildTestEnv(cfg *config.Config) (map[string]string, error) {
-	env := make(map[string]string, 8)
+func buildTestPluginRegistry(cfg *config.Config) (*plugin.Registry, error) {
+	reg := plugin.NewRegistry(log)
 
-	// ClickHouse configs as JSON array.
-	if len(cfg.ClickHouse) > 0 {
-		chConfigs, err := json.Marshal(cfg.ClickHouse)
+	// Register all compiled-in plugins.
+	reg.Add(clickhouseplugin.New())
+	reg.Add(prometheusplugin.New())
+	reg.Add(lokiplugin.New())
+
+	// Initialize plugins that have config.
+	for _, name := range reg.All() {
+		rawYAML, err := cfg.PluginConfigYAML(name)
 		if err != nil {
-			return nil, fmt.Errorf("marshaling ClickHouse configs: %w", err)
+			return nil, fmt.Errorf("getting config for plugin %q: %w", name, err)
 		}
 
-		env["XATU_CLICKHOUSE_CONFIGS"] = string(chConfigs)
-	}
-
-	// Prometheus configs as JSON array.
-	if len(cfg.Prometheus) > 0 {
-		promConfigs, err := json.Marshal(cfg.Prometheus)
-		if err != nil {
-			return nil, fmt.Errorf("marshaling Prometheus configs: %w", err)
+		if rawYAML == nil {
+			continue
 		}
 
-		env["XATU_PROMETHEUS_CONFIGS"] = string(promConfigs)
-	}
-
-	// Loki configs as JSON array.
-	if len(cfg.Loki) > 0 {
-		lokiConfigs, err := json.Marshal(cfg.Loki)
-		if err != nil {
-			return nil, fmt.Errorf("marshaling Loki configs: %w", err)
+		if err := reg.InitPlugin(name, rawYAML); err != nil {
+			return nil, fmt.Errorf("initializing plugin %q: %w", name, err)
 		}
-
-		env["XATU_LOKI_CONFIGS"] = string(lokiConfigs)
 	}
 
-	// S3 Storage.
+	return reg, nil
+}
+
+func buildTestEnv(cfg *config.Config, pluginReg *plugin.Registry) (map[string]string, error) {
+	// Get env vars from all initialized plugins.
+	env, err := pluginReg.SandboxEnv()
+	if err != nil {
+		return nil, fmt.Errorf("getting sandbox env from plugins: %w", err)
+	}
+
+	// Add platform S3 vars.
 	if cfg.Storage != nil {
-		env["XATU_S3_ENDPOINT"] = cfg.Storage.Endpoint
-		env["XATU_S3_ACCESS_KEY"] = cfg.Storage.AccessKey
-		env["XATU_S3_SECRET_KEY"] = cfg.Storage.SecretKey
-		env["XATU_S3_BUCKET"] = cfg.Storage.Bucket
-		env["XATU_S3_REGION"] = cfg.Storage.Region
+		env["ETHPANDAOPS_S3_ENDPOINT"] = cfg.Storage.Endpoint
+		env["ETHPANDAOPS_S3_ACCESS_KEY"] = cfg.Storage.AccessKey
+		env["ETHPANDAOPS_S3_SECRET_KEY"] = cfg.Storage.SecretKey
+		env["ETHPANDAOPS_S3_BUCKET"] = cfg.Storage.Bucket
+		env["ETHPANDAOPS_S3_REGION"] = cfg.Storage.Region
 
 		if cfg.Storage.PublicURLPrefix != "" {
-			env["XATU_S3_PUBLIC_URL_PREFIX"] = cfg.Storage.PublicURLPrefix
+			env["ETHPANDAOPS_S3_PUBLIC_URL_PREFIX"] = cfg.Storage.PublicURLPrefix
 		}
 	}
 

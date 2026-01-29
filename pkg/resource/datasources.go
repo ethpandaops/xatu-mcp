@@ -8,208 +8,102 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/sirupsen/logrus"
 
-	"github.com/ethpandaops/xatu-mcp/pkg/config"
+	"github.com/ethpandaops/mcp/pkg/plugin"
+	"github.com/ethpandaops/mcp/pkg/types"
 )
 
-// datasourcesResponse is the JSON response for datasources://list.
-type datasourcesResponse struct {
-	ClickHouse []clickHouseData   `json:"clickhouse"`
-	Prometheus []prometheusData   `json:"prometheus"`
-	Loki       []lokiInstanceData `json:"loki"`
+// DatasourcesResponse is the JSON response for datasources resources.
+type DatasourcesResponse struct {
+	Datasources []types.DatasourceInfo `json:"datasources"`
 }
 
-type clickHouseData struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	Database    string `json:"database"`
-}
-
-type prometheusData struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	URL         string `json:"url"`
-}
-
-type lokiInstanceData struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	URL         string `json:"url"`
-}
-
-// clickHouseListResponse is the JSON response for datasources://clickhouse.
-type clickHouseListResponse struct {
-	Clusters []clickHouseData `json:"clusters"`
-	Count    int              `json:"count"`
-}
-
-// prometheusListResponse is the JSON response for datasources://prometheus.
-type prometheusListResponse struct {
-	Instances []prometheusData `json:"instances"`
-	Count     int              `json:"count"`
-}
-
-// lokiListResponse is the JSON response for datasources://loki.
-type lokiListResponse struct {
-	Instances []lokiInstanceData `json:"instances"`
-	Count     int                `json:"count"`
-}
-
-// RegisterDatasourcesResources registers the datasources:// resources with the registry.
+// RegisterDatasourcesResources registers the datasources:// resources
+// with the registry.
 func RegisterDatasourcesResources(
 	log logrus.FieldLogger,
 	reg Registry,
-	chConfigs []config.ClickHouseConfig,
-	promConfigs []config.PrometheusConfig,
-	lokiConfigs []config.LokiConfig,
+	pluginReg *plugin.Registry,
 ) {
 	log = log.WithField("resource", "datasources")
 
-	// Register static datasources://list resource
+	// datasources://list - all datasources
 	reg.RegisterStatic(StaticResource{
-		Resource: mcp.Resource{
-			URI:         "datasources://list",
-			Name:        "Available Datasources",
-			Description: "List all datasources available for queries (ClickHouse, Prometheus, Loki)",
-			MIMEType:    "application/json",
-		},
-		Handler: func(_ context.Context, _ string) (string, error) {
-			chData := make([]clickHouseData, 0, len(chConfigs))
-			for _, ch := range chConfigs {
-				chData = append(chData, clickHouseData{
-					Name:        ch.Name,
-					Description: ch.Description,
-					Database:    ch.Database,
-				})
-			}
-
-			promData := make([]prometheusData, 0, len(promConfigs))
-			for _, p := range promConfigs {
-				promData = append(promData, prometheusData{
-					Name:        p.Name,
-					Description: p.Description,
-					URL:         p.URL,
-				})
-			}
-
-			lData := make([]lokiInstanceData, 0, len(lokiConfigs))
-			for _, l := range lokiConfigs {
-				lData = append(lData, lokiInstanceData{
-					Name:        l.Name,
-					Description: l.Description,
-					URL:         l.URL,
-				})
-			}
-
-			response := datasourcesResponse{
-				ClickHouse: chData,
-				Prometheus: promData,
-				Loki:       lData,
-			}
-
-			jsonData, err := json.MarshalIndent(response, "", "  ")
-			if err != nil {
-				return "", fmt.Errorf("marshaling datasources response: %w", err)
-			}
-
-			return string(jsonData), nil
-		},
+		Resource: mcp.NewResource(
+			"datasources://list",
+			"All Datasources",
+			mcp.WithResourceDescription("List of all configured datasources (ClickHouse, Prometheus, Loki)"),
+			mcp.WithMIMEType("application/json"),
+			mcp.WithAnnotations([]mcp.Role{mcp.RoleAssistant}, 0.8),
+		),
+		Handler: createDatasourcesHandler(pluginReg, ""),
 	})
 
-	// Register datasources://clickhouse
+	// datasources://clickhouse
 	reg.RegisterStatic(StaticResource{
-		Resource: mcp.Resource{
-			URI:         "datasources://clickhouse",
-			Name:        "ClickHouse Clusters",
-			Description: "List available ClickHouse clusters",
-			MIMEType:    "application/json",
-		},
-		Handler: func(_ context.Context, _ string) (string, error) {
-			data := make([]clickHouseData, 0, len(chConfigs))
-			for _, ch := range chConfigs {
-				data = append(data, clickHouseData{
-					Name:        ch.Name,
-					Description: ch.Description,
-					Database:    ch.Database,
-				})
-			}
-
-			response := clickHouseListResponse{
-				Clusters: data,
-				Count:    len(data),
-			}
-
-			jsonData, err := json.MarshalIndent(response, "", "  ")
-			if err != nil {
-				return "", fmt.Errorf("marshaling clickhouse response: %w", err)
-			}
-
-			return string(jsonData), nil
-		},
+		Resource: mcp.NewResource(
+			"datasources://clickhouse",
+			"ClickHouse Datasources",
+			mcp.WithResourceDescription("Configured ClickHouse clusters for blockchain data queries"),
+			mcp.WithMIMEType("application/json"),
+			mcp.WithAnnotations([]mcp.Role{mcp.RoleAssistant}, 0.7),
+		),
+		Handler: createDatasourcesHandler(pluginReg, "clickhouse"),
 	})
 
-	// Register datasources://prometheus
+	// datasources://prometheus
 	reg.RegisterStatic(StaticResource{
-		Resource: mcp.Resource{
-			URI:         "datasources://prometheus",
-			Name:        "Prometheus Instances",
-			Description: "List available Prometheus instances",
-			MIMEType:    "application/json",
-		},
-		Handler: func(_ context.Context, _ string) (string, error) {
-			data := make([]prometheusData, 0, len(promConfigs))
-			for _, p := range promConfigs {
-				data = append(data, prometheusData{
-					Name:        p.Name,
-					Description: p.Description,
-					URL:         p.URL,
-				})
-			}
-
-			response := prometheusListResponse{
-				Instances: data,
-				Count:     len(data),
-			}
-
-			jsonData, err := json.MarshalIndent(response, "", "  ")
-			if err != nil {
-				return "", fmt.Errorf("marshaling prometheus response: %w", err)
-			}
-
-			return string(jsonData), nil
-		},
+		Resource: mcp.NewResource(
+			"datasources://prometheus",
+			"Prometheus Datasources",
+			mcp.WithResourceDescription("Configured Prometheus instances for metrics queries"),
+			mcp.WithMIMEType("application/json"),
+			mcp.WithAnnotations([]mcp.Role{mcp.RoleAssistant}, 0.7),
+		),
+		Handler: createDatasourcesHandler(pluginReg, "prometheus"),
 	})
 
-	// Register datasources://loki
+	// datasources://loki
 	reg.RegisterStatic(StaticResource{
-		Resource: mcp.Resource{
-			URI:         "datasources://loki",
-			Name:        "Loki Instances",
-			Description: "List available Loki instances",
-			MIMEType:    "application/json",
-		},
-		Handler: func(_ context.Context, _ string) (string, error) {
-			data := make([]lokiInstanceData, 0, len(lokiConfigs))
-			for _, l := range lokiConfigs {
-				data = append(data, lokiInstanceData{
-					Name:        l.Name,
-					Description: l.Description,
-					URL:         l.URL,
-				})
-			}
-
-			response := lokiListResponse{
-				Instances: data,
-				Count:     len(data),
-			}
-
-			jsonData, err := json.MarshalIndent(response, "", "  ")
-			if err != nil {
-				return "", fmt.Errorf("marshaling loki response: %w", err)
-			}
-
-			return string(jsonData), nil
-		},
+		Resource: mcp.NewResource(
+			"datasources://loki",
+			"Loki Datasources",
+			mcp.WithResourceDescription("Configured Loki instances for log queries"),
+			mcp.WithMIMEType("application/json"),
+			mcp.WithAnnotations([]mcp.Role{mcp.RoleAssistant}, 0.7),
+		),
+		Handler: createDatasourcesHandler(pluginReg, "loki"),
 	})
 
 	log.Debug("Registered datasources resources")
+}
+
+func createDatasourcesHandler(pluginReg *plugin.Registry, filterType string) ReadHandler {
+	return func(_ context.Context, _ string) (string, error) {
+		allInfos := pluginReg.DatasourceInfo()
+
+		var filtered []types.DatasourceInfo
+		if filterType == "" {
+			if allInfos == nil {
+				filtered = make([]types.DatasourceInfo, 0)
+			} else {
+				filtered = allInfos
+			}
+		} else {
+			filtered = make([]types.DatasourceInfo, 0, len(allInfos))
+			for _, info := range allInfos {
+				if info.Type == filterType {
+					filtered = append(filtered, info)
+				}
+			}
+		}
+
+		response := DatasourcesResponse{Datasources: filtered}
+
+		data, err := json.MarshalIndent(response, "", "  ")
+		if err != nil {
+			return "", fmt.Errorf("marshaling datasources: %w", err)
+		}
+
+		return string(data), nil
+	}
 }

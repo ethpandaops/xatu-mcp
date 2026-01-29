@@ -60,7 +60,7 @@ def create_sql_correctness_metric(
         **kwargs,
         evaluation_steps=[
             "The SQL query is syntactically correct for ClickHouse",
-            "Table names referenced exist in the xatu schema (beacon_api_*, canonical_*, etc.)",
+            "Table names referenced exist in the Xatu data schema (beacon_api_*, canonical_*, etc.)",
             "Column names are valid for the referenced tables",
             "Time range filters use appropriate ClickHouse date/time functions",
             "The query uses appropriate aggregation functions (count, sum, avg, etc.)",

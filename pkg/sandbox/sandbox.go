@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ethpandaops/xatu-mcp/pkg/config"
+	"github.com/ethpandaops/mcp/pkg/config"
 	"github.com/sirupsen/logrus"
 )
 

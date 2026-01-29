@@ -4,7 +4,7 @@ This module provides functions to query ClickHouse clusters directly
 using the clickhouse-connect library.
 
 Example:
-    from xatu import clickhouse
+    from ethpandaops import clickhouse
 
     # List available ClickHouse clusters
     clusters = clickhouse.list_datasources()
@@ -56,7 +56,6 @@ class _ClusterConfig:
     skip_verify: bool
     timeout: int
     description: str
-    protocol: str  # "native" or "http"
 
 
 # Cache for cluster configurations.
@@ -70,26 +69,23 @@ def _load_clusters() -> None:
     if _CLUSTERS is not None:
         return
 
-    raw = os.environ.get("XATU_CLICKHOUSE_CONFIGS", "")
+    raw = os.environ.get("ETHPANDAOPS_CLICKHOUSE_CONFIGS", "")
     if not raw:
         raise ValueError(
-            "ClickHouse not configured. Set XATU_CLICKHOUSE_CONFIGS environment variable."
+            "ClickHouse not configured. Set ETHPANDAOPS_CLICKHOUSE_CONFIGS environment variable."
         )
 
     try:
         configs = json.loads(raw)
     except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid XATU_CLICKHOUSE_CONFIGS JSON: {e}") from e
+        raise ValueError(f"Invalid ETHPANDAOPS_CLICKHOUSE_CONFIGS JSON: {e}") from e
 
     _CLUSTERS = {}
     for cfg in configs:
-        # Get protocol setting (default to "native")
-        protocol = cfg.get("protocol", "native")
-
         # Parse host:port with IPv6 support using URL parsing
         raw_host = cfg.get("host", "")
-        # Default port based on protocol
-        port = 443 if protocol == "http" else 9440
+        # Default port (HTTP/HTTPS only)
+        port = 443
 
         # Try to parse as a URL to handle IPv6 addresses like [::1]:9440
         if raw_host.startswith("[") or "://" in raw_host:
@@ -131,7 +127,6 @@ def _load_clusters() -> None:
             skip_verify=skip_verify,
             timeout=cfg.get("timeout", 120),
             description=cfg.get("description", ""),
-            protocol=protocol,
         )
         _CLUSTERS[cluster.name] = cluster
 

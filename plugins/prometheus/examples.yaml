@@ -1,0 +1,14 @@
+prometheus_basics:
+  name: Prometheus Basics
+  description: Common PromQL query patterns for Ethereum infrastructure monitoring
+  examples:
+    - name: Check service health
+      description: Check if monitored services are up and running
+      cluster: prometheus
+      query: |
+        up
+    - name: HTTP request rate
+      description: Get the rate of HTTP requests over the last 5 minutes
+      cluster: prometheus
+      query: |
+        rate(http_requests_total[5m])

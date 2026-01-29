@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Langfuse management script for xatu-mcp evaluation."""
+"""Langfuse management script for ethpandaops-mcp evaluation."""
 
 from __future__ import annotations
 
@@ -38,11 +38,11 @@ def cmd_up(args: argparse.Namespace) -> int:
         print("Pre-configured with default keys - no setup needed!")
         print()
         print("  UI:       http://localhost:3000")
-        print("  Login:    admin@xatu.local / adminadmin")
-        print("  Project:  xatu-eval")
+        print("  Login:    admin@mcp.local / adminadmin")
+        print("  Project:  mcp-eval")
         print()
         print("To enable tracing, add to your .env:")
-        print("  XATU_EVAL_LANGFUSE_ENABLED=true")
+        print("  MCP_EVAL_LANGFUSE_ENABLED=true")
         print()
         print("Commands:")
         print("  uv run python -m scripts.langfuse logs -f  # View logs")
@@ -92,7 +92,7 @@ def cmd_reset(args: argparse.Namespace) -> int:
 def main() -> int:
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description="Manage Langfuse for xatu-mcp evaluation",
+        description="Manage Langfuse for ethpandaops-mcp evaluation",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

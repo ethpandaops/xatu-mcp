@@ -1,4 +1,4 @@
-// Package server provides the MCP server implementation for xatu-mcp.
+// Package server provides the MCP server implementation for ethpandaops-mcp.
 package server
 
 import (
@@ -14,13 +14,13 @@ import (
 	mcpserver "github.com/mark3labs/mcp-go/server"
 	"github.com/sirupsen/logrus"
 
-	"github.com/ethpandaops/xatu-mcp/internal/version"
-	"github.com/ethpandaops/xatu-mcp/pkg/auth"
-	"github.com/ethpandaops/xatu-mcp/pkg/config"
-	"github.com/ethpandaops/xatu-mcp/pkg/observability"
-	"github.com/ethpandaops/xatu-mcp/pkg/resource"
-	"github.com/ethpandaops/xatu-mcp/pkg/sandbox"
-	"github.com/ethpandaops/xatu-mcp/pkg/tool"
+	"github.com/ethpandaops/mcp/internal/version"
+	"github.com/ethpandaops/mcp/pkg/auth"
+	"github.com/ethpandaops/mcp/pkg/config"
+	"github.com/ethpandaops/mcp/pkg/observability"
+	"github.com/ethpandaops/mcp/pkg/resource"
+	"github.com/ethpandaops/mcp/pkg/sandbox"
+	"github.com/ethpandaops/mcp/pkg/tool"
 )
 
 // Transport constants.
@@ -100,7 +100,7 @@ func (s *service) Start(ctx context.Context) error {
 
 	// Create the MCP server
 	s.mcpServer = mcpserver.NewMCPServer(
-		"xatu-mcp",
+		"ethpandaops-mcp",
 		version.Version,
 		mcpserver.WithToolCapabilities(true),
 		mcpserver.WithResourceCapabilities(true, true),

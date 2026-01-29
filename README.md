@@ -1,4 +1,4 @@
-# xatu-mcp
+# ethpandaops-mcp
 
 An MCP server that provides AI assistants with Ethereum network analytics capabilities via [Xatu](https://github.com/ethpandaops/xatu) data.
 
@@ -25,7 +25,7 @@ Add to `~/.claude.json` under `mcpServers`:
 
 ```json
 {
-  "xatu-mcp": {
+  "ethpandaops-mcp": {
     "type": "http",
     "url": "http://localhost:2480/mcp"
   }
@@ -39,7 +39,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "xatu-mcp": {
+    "ethpandaops-mcp": {
       "type": "http",
       "url": "http://localhost:2480/mcp"
     }
@@ -51,10 +51,10 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 | Tool | Description |
 |------|-------------|
-| `execute_python` | Execute Python in a sandbox with the `xatu` library |
+| `execute_python` | Execute Python in a sandbox with the `ethpandaops` library |
 | `search_examples` | Search for query examples and patterns |
 
-Resources are available for getting started (`xatu://getting-started`), datasource discovery (`datasources://`), network info (`networks://`), table schemas (`clickhouse://`), and Python API docs (`python://xatu`).
+Resources are available for getting started (`mcp://getting-started`), datasource discovery (`datasources://`), network info (`networks://`), table schemas (`clickhouse://`), and Python API docs (`python://ethpandaops`).
 
 ## Development
 

@@ -31,8 +31,8 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/sirupsen/logrus"
 
-	"github.com/ethpandaops/xatu-mcp/pkg/auth/github"
-	"github.com/ethpandaops/xatu-mcp/pkg/config"
+	"github.com/ethpandaops/mcp/pkg/auth/github"
+	"github.com/ethpandaops/mcp/pkg/config"
 )
 
 const (
