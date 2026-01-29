@@ -20,6 +20,21 @@ type Service interface {
 	Execute(ctx context.Context, req ExecuteRequest) (*ExecutionResult, error)
 	// Name returns the backend name for logging/metrics.
 	Name() string
+
+	// Session management methods.
+
+	// ListSessions returns all active sessions. If ownerID is non-empty, filters by owner.
+	ListSessions(ctx context.Context, ownerID string) ([]SessionInfo, error)
+	// CreateSession creates a new empty session and returns its ID.
+	CreateSession(ctx context.Context, ownerID string, env map[string]string) (string, error)
+	// DestroySession destroys a session by ID.
+	// If ownerID is non-empty, verifies ownership before destroying.
+	DestroySession(ctx context.Context, sessionID, ownerID string) error
+	// CanCreateSession checks if a new session can be created.
+	// Returns (canCreate, currentCount, maxAllowed).
+	CanCreateSession(ctx context.Context, ownerID string) (bool, int, int)
+	// SessionsEnabled returns whether sessions are enabled.
+	SessionsEnabled() bool
 }
 
 // ExecuteRequest contains the parameters for code execution.
@@ -69,6 +84,15 @@ type SessionFile struct {
 	Name     string    `json:"name"`
 	Size     int64     `json:"size"`
 	Modified time.Time `json:"modified"`
+}
+
+// SessionInfo represents information about an active session.
+type SessionInfo struct {
+	ID             string        `json:"session_id"`
+	CreatedAt      time.Time     `json:"created_at"`
+	LastUsed       time.Time     `json:"last_used"`
+	TTLRemaining   time.Duration `json:"ttl_remaining"`
+	WorkspaceFiles []SessionFile `json:"workspace_files"`
 }
 
 // BackendType represents the available sandbox backend types.

@@ -257,7 +257,8 @@ func (m *SessionManager) expireSession(sessionID, containerID, reason string) er
 }
 
 // Destroy removes a session and triggers cleanup callback.
-func (m *SessionManager) Destroy(ctx context.Context, sessionID string) error {
+// If ownerID is non-empty, verifies ownership before destroying.
+func (m *SessionManager) Destroy(ctx context.Context, sessionID, ownerID string) error {
 	// Query Docker for the session container.
 	container, err := m.containerLister(ctx, sessionID)
 	if err != nil {
@@ -266,6 +267,11 @@ func (m *SessionManager) Destroy(ctx context.Context, sessionID string) error {
 
 	if container == nil {
 		return fmt.Errorf("session %s not found", sessionID)
+	}
+
+	// Verify ownership if ownerID is provided.
+	if ownerID != "" && container.OwnerID != "" && container.OwnerID != ownerID {
+		return fmt.Errorf("session %s not owned by caller", sessionID)
 	}
 
 	// Remove from lastUsed map.
@@ -284,6 +290,53 @@ func (m *SessionManager) Destroy(ctx context.Context, sessionID string) error {
 // Enabled returns whether sessions are enabled.
 func (m *SessionManager) Enabled() bool {
 	return m.cfg.IsEnabled()
+}
+
+// CanCreateSession checks if a new session can be created.
+// If ownerID is provided, counts only sessions owned by that user.
+// Returns (canCreate, currentCount, maxAllowed).
+func (m *SessionManager) CanCreateSession(ctx context.Context, ownerID string) (bool, int, int) {
+	if !m.cfg.IsEnabled() {
+		return false, 0, 0
+	}
+
+	maxSessions := m.cfg.MaxSessions
+	if maxSessions <= 0 {
+		// No limit configured.
+		return true, 0, 0
+	}
+
+	// Count active sessions.
+	containers, err := m.containerListAll(ctx)
+	if err != nil {
+		m.log.WithError(err).Warn("Failed to list session containers for limit check")
+		// Be conservative and allow creation on error.
+		return true, 0, maxSessions
+	}
+
+	// If ownerID is provided, count only sessions owned by that user.
+	count := 0
+	for _, c := range containers {
+		if ownerID == "" || c.OwnerID == ownerID {
+			count++
+		}
+	}
+
+	return count < maxSessions, count, maxSessions
+}
+
+// MaxSessions returns the configured maximum number of sessions.
+func (m *SessionManager) MaxSessions() int {
+	return m.cfg.MaxSessions
+}
+
+// GetLastUsed returns the last used time for a session.
+// Returns the zero time if the session hasn't been accessed since server start.
+func (m *SessionManager) GetLastUsed(sessionID string) time.Time {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	return m.lastUsed[sessionID]
 }
 
 // cleanupLoop runs periodically to destroy expired sessions.

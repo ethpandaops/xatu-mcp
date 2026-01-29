@@ -1,7 +1,8 @@
-"""ClickHouse data access via direct connections.
+"""ClickHouse data access via credential proxy.
 
-This module provides functions to query ClickHouse clusters directly
-using the clickhouse-connect library.
+This module provides functions to query ClickHouse clusters. All requests
+go through the credential proxy - credentials are never exposed to sandbox
+containers.
 
 Example:
     from ethpandaops import clickhouse
@@ -13,18 +14,20 @@ Example:
     df = clickhouse.query("xatu", "SELECT * FROM beacon_api_eth_v1_events_block LIMIT 10")
 """
 
+import io
 import json
-import logging
 import os
-import re
-from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlparse
 
-import clickhouse_connect
+import httpx
 import pandas as pd
 
-logger = logging.getLogger(__name__)
+# Proxy configuration (required).
+_PROXY_URL = os.environ.get("ETHPANDAOPS_PROXY_URL", "")
+_PROXY_TOKEN = os.environ.get("ETHPANDAOPS_PROXY_TOKEN", "")
+
+# Cache for datasource info.
+_DATASOURCE_INFO: list[dict[str, str]] | None = None
 
 
 class ClickHouseError(Exception):
@@ -42,131 +45,47 @@ class ClickHouseError(Exception):
         return "\n".join(parts)
 
 
-@dataclass
-class _ClusterConfig:
-    """Internal representation of a ClickHouse cluster configuration."""
-
-    name: str
-    host: str
-    port: int
-    database: str
-    username: str
-    password: str
-    secure: bool
-    skip_verify: bool
-    timeout: int
-    description: str
-
-
-# Cache for cluster configurations.
-_CLUSTERS: dict[str, _ClusterConfig] | None = None
-
-
-def _load_clusters() -> None:
-    """Load cluster configurations from environment variable."""
-    global _CLUSTERS
-
-    if _CLUSTERS is not None:
-        return
-
-    raw = os.environ.get("ETHPANDAOPS_CLICKHOUSE_CONFIGS", "")
-    if not raw:
+def _check_proxy_config() -> None:
+    """Verify proxy is configured."""
+    if not _PROXY_URL or not _PROXY_TOKEN:
         raise ValueError(
-            "ClickHouse not configured. Set ETHPANDAOPS_CLICKHOUSE_CONFIGS environment variable."
+            "Proxy not configured. ETHPANDAOPS_PROXY_URL and ETHPANDAOPS_PROXY_TOKEN are required."
         )
+
+
+def _load_datasources() -> list[dict[str, str]]:
+    """Load datasource info from environment variable."""
+    global _DATASOURCE_INFO
+
+    if _DATASOURCE_INFO is not None:
+        return _DATASOURCE_INFO
+
+    raw = os.environ.get("ETHPANDAOPS_CLICKHOUSE_DATASOURCES", "")
+    if not raw:
+        _DATASOURCE_INFO = []
+        return _DATASOURCE_INFO
 
     try:
-        configs = json.loads(raw)
+        _DATASOURCE_INFO = json.loads(raw)
     except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid ETHPANDAOPS_CLICKHOUSE_CONFIGS JSON: {e}") from e
+        raise ValueError(f"Invalid ETHPANDAOPS_CLICKHOUSE_DATASOURCES JSON: {e}") from e
 
-    _CLUSTERS = {}
-    for cfg in configs:
-        # Parse host:port with IPv6 support using URL parsing
-        raw_host = cfg.get("host", "")
-        # Default port (HTTP/HTTPS only)
-        port = 443
-
-        # Try to parse as a URL to handle IPv6 addresses like [::1]:9440
-        if raw_host.startswith("[") or "://" in raw_host:
-            # Handle bracketed IPv6 or full URL
-            parsed = urlparse(f"tcp://{raw_host}" if "://" not in raw_host else raw_host)
-            host = parsed.hostname or raw_host
-            if parsed.port:
-                port = parsed.port
-        elif re.match(r"^[^:]+:\d+$", raw_host):
-            # Simple host:port format (IPv4 or hostname)
-            host, port_str = raw_host.rsplit(":", 1)
-            try:
-                port = int(port_str)
-            except ValueError:
-                host = raw_host
-        else:
-            host = raw_host
-
-        # Get secure setting (default True)
-        secure = cfg.get("secure")
-        if secure is None:
-            secure = True
-
-        skip_verify = cfg.get("skip_verify", False)
-        if skip_verify:
-            logger.warning(
-                "TLS certificate verification disabled (skip_verify=true) for %s - vulnerable to MITM attacks",
-                cfg["name"],
-            )
-
-        cluster = _ClusterConfig(
-            name=cfg["name"],
-            host=host,
-            port=port,
-            database=cfg.get("database", "default"),
-            username=cfg.get("username", ""),
-            password=cfg.get("password", ""),
-            secure=secure,
-            skip_verify=skip_verify,
-            timeout=cfg.get("timeout", 120),
-            description=cfg.get("description", ""),
-        )
-        _CLUSTERS[cluster.name] = cluster
+    return _DATASOURCE_INFO
 
 
-def _get_client(cluster_name: str) -> clickhouse_connect.driver.Client:
-    """Get or create a ClickHouse client for a cluster.
+def _get_datasource_names() -> list[str]:
+    """Get list of datasource names for validation."""
+    return [ds["name"] for ds in _load_datasources()]
 
-    Args:
-        cluster_name: The logical name of the ClickHouse cluster.
 
-    Returns:
-        A clickhouse-connect client.
+def _get_client() -> httpx.Client:
+    """Get an HTTP client configured for the proxy."""
+    _check_proxy_config()
 
-    Raises:
-        ValueError: If the cluster is not found.
-    """
-    _load_clusters()
-
-    if _CLUSTERS is None or cluster_name not in _CLUSTERS:
-        available = list(_CLUSTERS.keys()) if _CLUSTERS else []
-        raise ValueError(
-            f"Unknown cluster '{cluster_name}'. Available clusters: {available}"
-        )
-
-    cluster = _CLUSTERS[cluster_name]
-
-    # Configure TLS verification
-    verify = not cluster.skip_verify
-
-    return clickhouse_connect.get_client(
-        host=cluster.host,
-        port=cluster.port,
-        username=cluster.username,
-        password=cluster.password,
-        database=cluster.database,
-        secure=cluster.secure,
-        verify=verify,
-        query_limit=0,  # No limit
-        connect_timeout=30,
-        send_receive_timeout=cluster.timeout,
+    return httpx.Client(
+        base_url=_PROXY_URL,
+        headers={"Authorization": f"Bearer {_PROXY_TOKEN}"},
+        timeout=httpx.Timeout(connect=5.0, read=300.0, write=60.0, pool=5.0),
     )
 
 
@@ -181,19 +100,7 @@ def list_datasources() -> list[dict[str, Any]]:
         >>> for c in clusters:
         ...     print(f"{c['name']}: {c['description']}")
     """
-    _load_clusters()
-
-    if _CLUSTERS is None:
-        return []
-
-    return [
-        {
-            "name": c.name,
-            "description": c.description,
-            "database": c.database,
-        }
-        for c in _CLUSTERS.values()
-    ]
+    return _load_datasources()
 
 
 def query(
@@ -219,40 +126,78 @@ def query(
         >>> df = query("xatu", "SELECT * FROM blocks LIMIT 10")
         >>> df = query("xatu", "SELECT * FROM blocks WHERE slot > {slot:UInt64}", {"slot": 1000})
     """
-    client = _get_client(cluster_name)
+    # Validate cluster exists.
+    datasources = _get_datasource_names()
+    if cluster_name not in datasources:
+        raise ValueError(
+            f"Unknown cluster '{cluster_name}'. Available clusters: {datasources}"
+        )
 
     try:
-        if parameters:
-            result = client.query_df(sql, parameters=parameters)
-        else:
-            result = client.query_df(sql)
+        with _get_client() as client:
+            params = {"default_format": "TabSeparatedWithNames"}
+            if parameters:
+                params.update(_build_query_params(parameters))
 
-        return result
+            # ClickHouse HTTP interface expects POST with query in body.
+            response = client.post(
+                f"/clickhouse/{cluster_name}/",
+                content=sql,
+                params=params,
+            )
+            response.raise_for_status()
+
+            # Parse TSV response into DataFrame.
+            if response.text.strip():
+                return pd.read_csv(io.StringIO(response.text), sep="\t")
+
+            return pd.DataFrame()
+
     except Exception as e:
         error_msg = str(e)
-
-        # Provide helpful suggestions for common errors
-        suggestion = None
-        if "TIMEOUT" in error_msg.upper() or "timeout" in error_msg.lower():
-            suggestion = (
-                "Query timed out. Ensure you're filtering by the table's partition column "
-                "(usually slot_start_date_time) to avoid full table scans. "
-                "Use clickhouse://tables/{table} resource to find the partition key."
-            )
-        elif "MEMORY_LIMIT" in error_msg.upper():
-            suggestion = (
-                "Query exceeded memory limit. Add more restrictive filters or use LIMIT clause. "
-                "Consider filtering by partition key first."
-            )
-        elif "Unknown identifier" in error_msg or "no column" in error_msg.lower():
-            suggestion = (
-                "Check column names against clickhouse://tables/{table} resource. "
-                "Column names are case-sensitive."
-            )
-
+        suggestion = _get_error_suggestion(error_msg)
         raise ClickHouseError(error_msg, suggestion) from e
-    finally:
-        client.close()
+
+
+def _get_error_suggestion(error_msg: str) -> str | None:
+    """Get a helpful suggestion based on the error message."""
+    if "TIMEOUT" in error_msg.upper() or "timeout" in error_msg.lower():
+        return (
+            "Query timed out. Ensure you're filtering by the table's partition column "
+            "(usually slot_start_date_time) to avoid full table scans. "
+            "Use clickhouse://tables/{table} resource to find the partition key."
+        )
+    elif "MEMORY_LIMIT" in error_msg.upper():
+        return (
+            "Query exceeded memory limit. Add more restrictive filters or use LIMIT clause. "
+            "Consider filtering by partition key first."
+        )
+    elif "Unknown identifier" in error_msg or "no column" in error_msg.lower():
+        return (
+            "Check column names against clickhouse://tables/{table} resource. "
+            "Column names are case-sensitive."
+        )
+
+    return None
+
+
+def _build_query_params(parameters: dict[str, Any]) -> dict[str, str]:
+    """Build ClickHouse HTTP query parameters for named parameters."""
+    params: dict[str, str] = {}
+    for key, value in parameters.items():
+        params[f"param_{key}"] = _format_param_value(value)
+
+    return params
+
+
+def _format_param_value(value: Any) -> str:
+    """Format a parameter value for ClickHouse HTTP interface."""
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    if value is None:
+        return ""
+
+    return str(value)
 
 
 def query_raw(
@@ -276,7 +221,7 @@ def query_raw(
     df = query(cluster_name, sql, parameters)
 
     if df.empty:
-        return [], []
+        return [], list(df.columns)
 
     rows = [tuple(row) for row in df.values]
     columns = list(df.columns)

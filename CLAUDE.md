@@ -189,7 +189,7 @@ Key resources exposed by the server:
 - `clickhouse://tables/{table}` - Table schema details
 - `python://ethpandaops` - Python library function signatures
 - `examples://queries` - Common query patterns
-- `mcp://getting-started` - Getting started guide
+- `ethpandaops://getting-started` - Getting started guide
 
 ## Local Development
 
@@ -225,13 +225,13 @@ Key resources exposed by the server:
 Runs the MCP server with S3-compatible storage for output files.
 
 ```bash
-docker-compose up -d              # Start all services
-docker-compose logs -f mcp-server # View server logs
-docker-compose down               # Stop all services
+docker-compose up -d                            # Start all services
+docker-compose logs -f ethpandaops-mcp-server   # View server logs
+docker-compose down                             # Stop all services
 ```
 
 **Services:**
-- `mcp-server` - The MCP server (ports 2480 for MCP, 31490 for metrics)
+- `ethpandaops-mcp-server` - The MCP server (ports 2480 for MCP, 31490 for metrics)
 - `minio` - S3-compatible storage for chart/file uploads (port 31400 API, 31401 console)
 - `minio-init` - Creates the output bucket on startup
 - `sandbox-builder` - Builds the sandbox Docker image
@@ -241,8 +241,8 @@ docker-compose down               # Stop all services
 - `config.yaml` in project root
 
 **Networks:**
-- `mcp-external` - Exposed to host (MCP server, MinIO)
-- `mcp-internal` - Sandbox containers reach MinIO and external datasources (ClickHouse, Prometheus, Loki). Not marked `internal` so containers can resolve external DNS. In stdio mode (outside docker-compose), the server auto-creates this network on startup.
+- `ethpandaops-mcp-external` - Exposed to host (MCP server, MinIO)
+- `ethpandaops-mcp-internal` - Sandbox containers reach MinIO and external datasources (ClickHouse, Prometheus, Loki). Not marked `internal` so containers can resolve external DNS. In stdio mode (outside docker-compose), the server auto-creates this network on startup.
 
 #### Langfuse Stack (`tests/eval/docker-compose.langfuse.yaml`)
 

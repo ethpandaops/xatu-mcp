@@ -11,6 +11,8 @@ import (
 	"github.com/ethpandaops/mcp/pkg/config"
 	"github.com/ethpandaops/mcp/pkg/embedding"
 	"github.com/ethpandaops/mcp/pkg/plugin"
+	"github.com/ethpandaops/mcp/pkg/proxy"
+	"github.com/ethpandaops/mcp/pkg/proxy/handlers"
 	"github.com/ethpandaops/mcp/pkg/resource"
 	"github.com/ethpandaops/mcp/pkg/sandbox"
 	"github.com/ethpandaops/mcp/pkg/tool"
@@ -76,11 +78,24 @@ func (b *Builder) Build(ctx context.Context) (Service, error) {
 
 	b.log.Info("All plugins started")
 
+	// Create and start credential proxy service.
+	// Proxy is always enabled - sandbox containers never receive credentials directly.
+	proxySvc := b.buildProxy(pluginReg)
+	if err := proxySvc.Start(ctx); err != nil {
+		pluginReg.StopAll(ctx)
+		_ = sandboxSvc.Stop(ctx)
+
+		return nil, fmt.Errorf("starting proxy: %w", err)
+	}
+
+	b.log.WithField("url", proxySvc.URL()).Info("Credential proxy started")
+
 	// Create cartographoor client for network discovery.
 	cartographoorClient := b.buildCartographoor()
 
 	// Start the cartographoor client to fetch initial network data.
 	if err := cartographoorClient.Start(ctx); err != nil {
+		_ = proxySvc.Stop(ctx)
 		pluginReg.StopAll(ctx)
 		_ = sandboxSvc.Stop(ctx)
 
@@ -93,6 +108,7 @@ func (b *Builder) Build(ctx context.Context) (Service, error) {
 	authSvc, err := b.buildAuth()
 	if err != nil {
 		_ = cartographoorClient.Stop()
+		_ = proxySvc.Stop(ctx)
 		pluginReg.StopAll(ctx)
 		_ = sandboxSvc.Stop(ctx)
 
@@ -102,6 +118,7 @@ func (b *Builder) Build(ctx context.Context) (Service, error) {
 	// Start the auth service.
 	if err := authSvc.Start(ctx); err != nil {
 		_ = cartographoorClient.Stop()
+		_ = proxySvc.Stop(ctx)
 		pluginReg.StopAll(ctx)
 		_ = sandboxSvc.Stop(ctx)
 
@@ -117,6 +134,7 @@ func (b *Builder) Build(ctx context.Context) (Service, error) {
 	if err != nil {
 		_ = authSvc.Stop()
 		_ = cartographoorClient.Stop()
+		_ = proxySvc.Stop(ctx)
 		pluginReg.StopAll(ctx)
 		_ = sandboxSvc.Stop(ctx)
 
@@ -128,7 +146,7 @@ func (b *Builder) Build(ctx context.Context) (Service, error) {
 	}
 
 	// Create tool registry and register tools.
-	toolReg := b.buildToolRegistry(sandboxSvc, exampleIndex, pluginReg)
+	toolReg := b.buildToolRegistry(sandboxSvc, exampleIndex, pluginReg, proxySvc)
 
 	// Create resource registry and register resources.
 	resourceReg := b.buildResourceRegistry(cartographoorClient, pluginReg, toolReg)
@@ -188,16 +206,62 @@ func (b *Builder) buildAuth() (auth.SimpleService, error) {
 	return auth.NewSimpleService(b.log, b.cfg.Auth, b.cfg.Server.BaseURL)
 }
 
+// buildProxy creates the credential proxy service.
+func (b *Builder) buildProxy(pluginReg *plugin.Registry) proxy.Service {
+	opts := proxy.Options{
+		Config: proxy.Config{
+			ListenAddr:  b.cfg.Proxy.ListenAddr,
+			TokenTTL:    b.cfg.Proxy.TokenTTL,
+			SandboxHost: b.cfg.Proxy.SandboxHost,
+		},
+	}
+
+	// Collect proxy configs from all plugins.
+	for _, p := range pluginReg.Initialized() {
+		cfg := p.ProxyConfig()
+		if cfg == nil {
+			continue
+		}
+
+		switch c := cfg.(type) {
+		case []handlers.ClickHouseConfig:
+			opts.ClickHouse = c
+		case []handlers.PrometheusConfig:
+			opts.Prometheus = c
+		case []handlers.LokiConfig:
+			opts.Loki = c
+		}
+	}
+
+	// Add S3 config from storage config.
+	if b.cfg.Storage != nil {
+		opts.S3 = &handlers.S3Config{
+			Endpoint:        b.cfg.Storage.Endpoint,
+			AccessKey:       b.cfg.Storage.AccessKey,
+			SecretKey:       b.cfg.Storage.SecretKey,
+			Bucket:          b.cfg.Storage.Bucket,
+			Region:          b.cfg.Storage.Region,
+			PublicURLPrefix: b.cfg.Storage.PublicURLPrefix,
+		}
+	}
+
+	return proxy.New(b.log, opts)
+}
+
 // buildToolRegistry creates and populates the tool registry.
 func (b *Builder) buildToolRegistry(
 	sandboxSvc sandbox.Service,
 	exampleIndex *resource.ExampleIndex,
 	pluginReg *plugin.Registry,
+	proxySvc proxy.Service,
 ) tool.Registry {
 	reg := tool.NewRegistry(b.log)
 
 	// Register execute_python tool.
-	reg.Register(tool.NewExecutePythonTool(b.log, sandboxSvc, b.cfg, pluginReg))
+	reg.Register(tool.NewExecutePythonTool(b.log, sandboxSvc, b.cfg, pluginReg, proxySvc))
+
+	// Register manage_session tool.
+	reg.Register(tool.NewManageSessionTool(b.log, sandboxSvc))
 
 	// Register search_examples tool (requires example index).
 	if exampleIndex != nil {

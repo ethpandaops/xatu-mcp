@@ -49,7 +49,7 @@ func RegisterGettingStartedResources(
 
 	reg.RegisterStatic(StaticResource{
 		Resource: mcp.NewResource(
-			"mcp://getting-started",
+			"ethpandaops://getting-started",
 			"Getting Started Guide",
 			mcp.WithResourceDescription("Essential guide for querying data - read this first!"),
 			mcp.WithMIMEType("text/markdown"),
@@ -111,7 +111,7 @@ func createGettingStartedHandler(
 
 		for _, res := range staticResources {
 			// Skip self-reference.
-			if res.URI == "mcp://getting-started" {
+			if res.URI == "ethpandaops://getting-started" {
 				continue
 			}
 

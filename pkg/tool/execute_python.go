@@ -7,12 +7,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/sirupsen/logrus"
+
 	"github.com/ethpandaops/mcp/pkg/auth"
 	"github.com/ethpandaops/mcp/pkg/config"
 	"github.com/ethpandaops/mcp/pkg/plugin"
+	"github.com/ethpandaops/mcp/pkg/proxy"
 	"github.com/ethpandaops/mcp/pkg/sandbox"
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -95,6 +98,7 @@ func NewExecutePythonTool(
 	sandboxSvc sandbox.Service,
 	cfg *config.Config,
 	pluginReg *plugin.Registry,
+	proxySvc proxy.Service,
 ) Definition {
 	return Definition{
 		Tool: mcp.Tool{
@@ -121,7 +125,7 @@ func NewExecutePythonTool(
 				Required: []string{"code"},
 			},
 		},
-		Handler: newExecutePythonHandler(log, sandboxSvc, cfg, pluginReg),
+		Handler: newExecutePythonHandler(log, sandboxSvc, cfg, pluginReg, proxySvc),
 	}
 }
 
@@ -131,6 +135,7 @@ func newExecutePythonHandler(
 	sandboxSvc sandbox.Service,
 	cfg *config.Config,
 	pluginReg *plugin.Registry,
+	proxySvc proxy.Service,
 ) Handler {
 	handlerLog := log.WithField("tool", ExecutePythonToolName)
 
@@ -164,6 +169,9 @@ func newExecutePythonHandler(
 			ownerID = fmt.Sprintf("%d", user.GitHubID)
 		}
 
+		// Generate a unique execution tracking ID for token management.
+		executionTrackingID := uuid.New().String()
+
 		handlerLog.WithFields(logrus.Fields{
 			"code_length": len(code),
 			"timeout":     timeout,
@@ -172,12 +180,30 @@ func newExecutePythonHandler(
 			"owner_id":    ownerID,
 		}).Info("Executing Python code")
 
-		// Build environment variables for the sandbox.
-		env, err := buildSandboxEnv(cfg, pluginReg)
+		// Build credential-free environment variables for the sandbox.
+		env, err := buildSandboxEnv(cfg, pluginReg, proxySvc)
 		if err != nil {
 			handlerLog.WithError(err).Error("Failed to build sandbox environment")
 
 			return CallToolError(fmt.Errorf("failed to configure sandbox: %w", err)), nil
+		}
+
+		// Register token BEFORE execution so sandbox can use it.
+		proxyToken := proxySvc.RegisterToken(executionTrackingID)
+		env["ETHPANDAOPS_PROXY_TOKEN"] = proxyToken
+
+		// Ensure token is revoked after execution completes (or fails).
+		defer proxySvc.RevokeToken(executionTrackingID)
+
+		// Check session limit before creating a new session.
+		if sessionID == "" && sandboxSvc.SessionsEnabled() {
+			canCreate, count, maxAllowed := sandboxSvc.CanCreateSession(ctx, ownerID)
+			if !canCreate {
+				return CallToolError(fmt.Errorf(
+					"maximum sessions limit reached (%d/%d). Use manage_session with operation 'list' to see sessions, then 'destroy' to free up a slot",
+					count, maxAllowed,
+				)), nil
+			}
 		}
 
 		// Execute the code in the sandbox.
@@ -282,26 +308,32 @@ func formatSize(bytes int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
-// buildSandboxEnv creates the environment variables map for the sandbox.
-// It aggregates env vars from all plugins and adds platform S3 vars.
-func buildSandboxEnv(cfg *config.Config, pluginReg *plugin.Registry) (map[string]string, error) {
-	// Get env vars from all plugins.
+// buildSandboxEnv creates credential-free environment variables for the sandbox.
+// The proxy URL and datasource info are included, but no credentials.
+// The token is added separately by the caller.
+func buildSandboxEnv(
+	cfg *config.Config,
+	pluginReg *plugin.Registry,
+	proxySvc proxy.Service,
+) (map[string]string, error) {
+	// Get credential-free env vars from all plugins.
+	// This includes datasource info (name, description, database/url) for each datasource type.
 	env, err := pluginReg.SandboxEnv()
 	if err != nil {
-		return nil, fmt.Errorf("collecting plugin sandbox env: %w", err)
+		return nil, fmt.Errorf("collecting sandbox env: %w", err)
 	}
 
-	// S3 Storage (platform-owned).
-	if cfg.Storage != nil {
-		env["ETHPANDAOPS_S3_ENDPOINT"] = cfg.Storage.Endpoint
-		env["ETHPANDAOPS_S3_ACCESS_KEY"] = cfg.Storage.AccessKey
-		env["ETHPANDAOPS_S3_SECRET_KEY"] = cfg.Storage.SecretKey
-		env["ETHPANDAOPS_S3_BUCKET"] = cfg.Storage.Bucket
-		env["ETHPANDAOPS_S3_REGION"] = cfg.Storage.Region
+	// Add proxy URL.
+	env["ETHPANDAOPS_PROXY_URL"] = proxySvc.URL()
 
-		if cfg.Storage.PublicURLPrefix != "" {
-			env["ETHPANDAOPS_S3_PUBLIC_URL_PREFIX"] = cfg.Storage.PublicURLPrefix
-		}
+	// Add S3 bucket name (no credentials).
+	if bucket := proxySvc.S3Bucket(); bucket != "" {
+		env["ETHPANDAOPS_S3_BUCKET"] = bucket
+	}
+
+	// Add public URL prefix for S3 if configured.
+	if cfg.Storage != nil && cfg.Storage.PublicURLPrefix != "" {
+		env["ETHPANDAOPS_S3_PUBLIC_URL_PREFIX"] = cfg.Storage.PublicURLPrefix
 	}
 
 	return env, nil

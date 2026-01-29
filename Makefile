@@ -77,7 +77,7 @@ docker-push: docker ## Push Docker image
 	docker push $(DOCKER_IMAGE):latest
 
 docker-sandbox: ## Build sandbox Docker image
-	docker build -t mcp-sandbox:latest -f sandbox/Dockerfile .
+	docker build -t ethpandaops-mcp-sandbox:latest -f sandbox/Dockerfile .
 
 test-sandbox: build docker-sandbox ## Test sandbox execution (requires .env)
 	@if [ -f .env ]; then \

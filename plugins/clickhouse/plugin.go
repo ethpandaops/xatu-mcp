@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 
 	"github.com/ethpandaops/mcp/pkg/plugin"
+	"github.com/ethpandaops/mcp/pkg/proxy/handlers"
 	"github.com/ethpandaops/mcp/pkg/types"
 )
 
@@ -81,17 +84,100 @@ func (p *Plugin) Validate() error {
 	return nil
 }
 
+// SandboxEnv returns credential-free environment variables for the sandbox.
+// Credentials are never passed to sandbox containers - they connect via
+// the credential proxy instead.
 func (p *Plugin) SandboxEnv() (map[string]string, error) {
 	if len(p.cfg.Clusters) == 0 {
 		return nil, nil
 	}
-	chConfigs, err := json.Marshal(p.cfg.Clusters)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling ClickHouse configs: %w", err)
+
+	// Return datasource info without credentials.
+	type datasourceInfo struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Database    string `json:"database"`
 	}
+
+	infos := make([]datasourceInfo, 0, len(p.cfg.Clusters))
+	for _, cluster := range p.cfg.Clusters {
+		infos = append(infos, datasourceInfo{
+			Name:        cluster.Name,
+			Description: cluster.Description,
+			Database:    cluster.Database,
+		})
+	}
+
+	infosJSON, err := json.Marshal(infos)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling ClickHouse datasource info: %w", err)
+	}
+
 	return map[string]string{
-		"ETHPANDAOPS_CLICKHOUSE_CONFIGS": string(chConfigs),
+		"ETHPANDAOPS_CLICKHOUSE_DATASOURCES": string(infosJSON),
 	}, nil
+}
+
+// ProxyConfig returns the configuration needed by the credential proxy.
+func (p *Plugin) ProxyConfig() any {
+	if len(p.cfg.Clusters) == 0 {
+		return nil
+	}
+
+	configs := make([]handlers.ClickHouseConfig, 0, len(p.cfg.Clusters))
+
+	for _, cluster := range p.cfg.Clusters {
+		host, port := parseHostPort(cluster.Host, 443)
+
+		configs = append(configs, handlers.ClickHouseConfig{
+			Name:       cluster.Name,
+			Host:       host,
+			Port:       port,
+			Database:   cluster.Database,
+			Username:   cluster.Username,
+			Password:   cluster.Password,
+			Secure:     cluster.IsSecure(),
+			SkipVerify: cluster.SkipVerify,
+			Timeout:    cluster.Timeout,
+		})
+	}
+
+	return configs
+}
+
+// parseHostPort extracts host and port from a host:port string.
+// Handles IPv6 addresses in bracket notation [::1]:port.
+func parseHostPort(hostPort string, defaultPort int) (string, int) {
+	// Handle IPv6 with brackets: [::1]:port
+	if len(hostPort) > 0 && hostPort[0] == '[' {
+		bracketIdx := -1
+		for i, c := range hostPort {
+			if c == ']' {
+				bracketIdx = i
+				break
+			}
+		}
+		if bracketIdx > 0 {
+			host := hostPort[1:bracketIdx]
+			if bracketIdx+1 < len(hostPort) && hostPort[bracketIdx+1] == ':' {
+				portStr := hostPort[bracketIdx+2:]
+				if port, err := strconv.Atoi(portStr); err == nil {
+					return host, port
+				}
+			}
+			return host, defaultPort
+		}
+	}
+
+	// Handle host:port (IPv4 or hostname)
+	re := regexp.MustCompile(`^([^:]+):(\d+)$`)
+	if matches := re.FindStringSubmatch(hostPort); len(matches) == 3 {
+		if port, err := strconv.Atoi(matches[2]); err == nil {
+			return matches[1], port
+		}
+	}
+
+	return hostPort, defaultPort
 }
 
 func (p *Plugin) DatasourceInfo() []types.DatasourceInfo {

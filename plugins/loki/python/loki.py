@@ -1,7 +1,8 @@
-"""Loki log access via direct connections.
+"""Loki log access via credential proxy.
 
-This module provides functions to query Loki instances directly
-using the HTTP API.
+This module provides functions to query Loki instances. All requests
+go through the credential proxy - credentials are never exposed to sandbox
+containers.
 
 Example:
     from ethpandaops import loki
@@ -23,118 +24,63 @@ Example:
 """
 
 import json
-import logging
 import os
 import time as time_module
-from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
 from ethpandaops._time import parse_duration
 
-logger = logging.getLogger(__name__)
+# Proxy configuration (required).
+_PROXY_URL = os.environ.get("ETHPANDAOPS_PROXY_URL", "")
+_PROXY_TOKEN = os.environ.get("ETHPANDAOPS_PROXY_TOKEN", "")
+
+# Cache for datasource info.
+_DATASOURCE_INFO: list[dict[str, str]] | None = None
 
 
-@dataclass
-class _InstanceConfig:
-    """Internal representation of a Loki instance configuration."""
-
-    name: str
-    url: str
-    username: str
-    password: str
-    skip_verify: bool
-    timeout: int
-    description: str
-
-
-# Cache for instance configurations.
-_INSTANCES: dict[str, _InstanceConfig] | None = None
-
-
-def _load_instances() -> None:
-    """Load instance configurations from environment variable."""
-    global _INSTANCES
-
-    if _INSTANCES is not None:
-        return
-
-    raw = os.environ.get("ETHPANDAOPS_LOKI_CONFIGS", "")
-    if not raw:
+def _check_proxy_config() -> None:
+    """Verify proxy is configured."""
+    if not _PROXY_URL or not _PROXY_TOKEN:
         raise ValueError(
-            "Loki not configured. Set ETHPANDAOPS_LOKI_CONFIGS environment variable."
+            "Proxy not configured. ETHPANDAOPS_PROXY_URL and ETHPANDAOPS_PROXY_TOKEN are required."
         )
+
+
+def _load_datasources() -> list[dict[str, str]]:
+    """Load datasource info from environment variable."""
+    global _DATASOURCE_INFO
+
+    if _DATASOURCE_INFO is not None:
+        return _DATASOURCE_INFO
+
+    raw = os.environ.get("ETHPANDAOPS_LOKI_DATASOURCES", "")
+    if not raw:
+        _DATASOURCE_INFO = []
+        return _DATASOURCE_INFO
 
     try:
-        configs = json.loads(raw)
+        _DATASOURCE_INFO = json.loads(raw)
     except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid ETHPANDAOPS_LOKI_CONFIGS JSON: {e}") from e
+        raise ValueError(f"Invalid ETHPANDAOPS_LOKI_DATASOURCES JSON: {e}") from e
 
-    _INSTANCES = {}
-    for cfg in configs:
-        skip_verify = cfg.get("skip_verify", False)
-        if skip_verify:
-            logger.warning(
-                "TLS certificate verification disabled (skip_verify=true) for %s - vulnerable to MITM attacks",
-                cfg["name"],
-            )
-
-        instance = _InstanceConfig(
-            name=cfg["name"],
-            url=cfg.get("url", "").rstrip("/"),
-            username=cfg.get("username", ""),
-            password=cfg.get("password", ""),
-            skip_verify=skip_verify,
-            timeout=cfg.get("timeout", 60),
-            description=cfg.get("description", ""),
-        )
-        _INSTANCES[instance.name] = instance
+    return _DATASOURCE_INFO
 
 
-def _get_client(instance_name: str) -> httpx.Client:
-    """Get an HTTP client for a Loki instance.
+def _get_datasource_names() -> list[str]:
+    """Get list of datasource names for validation."""
+    return [ds["name"] for ds in _load_datasources()]
 
-    Args:
-        instance_name: The logical name of the Loki instance.
 
-    Returns:
-        An httpx client configured for the instance.
-
-    Raises:
-        ValueError: If the instance is not found.
-    """
-    _load_instances()
-
-    if _INSTANCES is None or instance_name not in _INSTANCES:
-        available = list(_INSTANCES.keys()) if _INSTANCES else []
-        raise ValueError(
-            f"Unknown instance '{instance_name}'. Available instances: {available}"
-        )
-
-    instance = _INSTANCES[instance_name]
-
-    # Configure authentication
-    auth = None
-    if instance.username:
-        auth = (instance.username, instance.password)
-
-    # Configure TLS verification
-    verify = not instance.skip_verify
-
-    # Configure granular timeout (connect, read, write, pool)
-    timeout = httpx.Timeout(
-        connect=5.0,
-        read=float(instance.timeout),
-        write=float(instance.timeout),
-        pool=5.0,
-    )
+def _get_client() -> httpx.Client:
+    """Get an HTTP client configured for the proxy."""
+    _check_proxy_config()
 
     return httpx.Client(
-        base_url=instance.url,
-        auth=auth,
-        timeout=timeout,
-        verify=verify,
+        base_url=_PROXY_URL,
+        headers={"Authorization": f"Bearer {_PROXY_TOKEN}"},
+        timeout=httpx.Timeout(connect=5.0, read=120.0, write=30.0, pool=5.0),
     )
 
 
@@ -149,19 +95,7 @@ def list_datasources() -> list[dict[str, Any]]:
         >>> for inst in instances:
         ...     print(f"{inst['name']}: {inst['description']}")
     """
-    _load_instances()
-
-    if _INSTANCES is None:
-        return []
-
-    return [
-        {
-            "name": inst.name,
-            "description": inst.description,
-            "url": inst.url,
-        }
-        for inst in _INSTANCES.values()
-    ]
+    return _load_datasources()
 
 
 def _parse_time(time_str: str) -> str:
@@ -181,24 +115,24 @@ def _parse_time(time_str: str) -> str:
         seconds = parse_duration(duration)
         return str(int((time_module.time() - seconds) * 1_000_000_000))
 
-    # Try Unix timestamp (seconds)
+    # Try Unix timestamp (seconds).
     try:
         ts = int(time_str)
-        # If it looks like seconds (< 1e12), convert to nanoseconds
+        # If it looks like seconds (< 1e12), convert to nanoseconds.
         if ts < 1_000_000_000_000:
             return str(ts * 1_000_000_000)
         return str(ts)
     except ValueError:
         pass
 
-    # Try float (Unix timestamp with decimals)
+    # Try float (Unix timestamp with decimals).
     try:
         ts = float(time_str)
         return str(int(ts * 1_000_000_000))
     except ValueError:
         pass
 
-    # Assume RFC3339
+    # Assume RFC3339.
     from datetime import datetime
 
     try:
@@ -206,6 +140,72 @@ def _parse_time(time_str: str) -> str:
         return str(int(dt.timestamp() * 1_000_000_000))
     except ValueError as e:
         raise ValueError(f"Cannot parse time '{time_str}': {e}") from e
+
+
+def _parse_log_results(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Parse Loki query results into a list of log entries."""
+    results = []
+    for stream in data.get("data", {}).get("result", []):
+        labels = stream.get("stream", {})
+        for value in stream.get("values", []):
+            timestamp, line = value
+            results.append(
+                {
+                    "timestamp": timestamp,
+                    "labels": labels,
+                    "line": line,
+                }
+            )
+
+    return results
+
+
+def _query_api(
+    instance_name: str, path: str, params: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Execute a query against the Loki API via proxy."""
+    datasources = _get_datasource_names()
+    if instance_name not in datasources:
+        raise ValueError(
+            f"Unknown instance '{instance_name}'. Available instances: {datasources}"
+        )
+
+    with _get_client() as client:
+        response = client.get(f"/loki/{instance_name}{path}", params=params)
+        response.raise_for_status()
+
+        data = response.json()
+
+        if data.get("status") != "success":
+            raise ValueError(
+                f"Loki query failed: {data.get('error', 'Unknown error')}"
+            )
+
+        return _parse_log_results(data)
+
+
+def _query_labels_api(
+    instance_name: str, path: str, params: dict[str, str]
+) -> list[str]:
+    """Execute a labels query against the Loki API via proxy."""
+    datasources = _get_datasource_names()
+    if instance_name not in datasources:
+        raise ValueError(
+            f"Unknown instance '{instance_name}'. Available instances: {datasources}"
+        )
+
+    with _get_client() as client:
+        response = client.get(f"/loki/{instance_name}{path}", params=params)
+        response.raise_for_status()
+
+        data = response.json()
+
+        if data.get("status") != "success":
+            raise ValueError(
+                f"Failed to get labels: {data.get('error', 'Unknown error')}"
+            )
+
+        return data["data"]
 
 
 def query(
@@ -239,7 +239,7 @@ def query(
         "direction": direction,
     }
 
-    # Set default time range if not provided
+    # Set default time range if not provided.
     if start:
         params["start"] = _parse_time(start)
     else:
@@ -250,32 +250,7 @@ def query(
     else:
         params["end"] = _parse_time("now")
 
-    with _get_client(instance_name) as client:
-        response = client.get("/loki/api/v1/query_range", params=params)
-        response.raise_for_status()
-
-        data = response.json()
-
-        if data.get("status") != "success":
-            raise ValueError(
-                f"Loki query failed: {data.get('error', 'Unknown error')}"
-            )
-
-        # Parse the results
-        results = []
-        for stream in data.get("data", {}).get("result", []):
-            labels = stream.get("stream", {})
-            for value in stream.get("values", []):
-                timestamp, line = value
-                results.append(
-                    {
-                        "timestamp": timestamp,
-                        "labels": labels,
-                        "line": line,
-                    }
-                )
-
-        return results
+    return _query_api(instance_name, "/loki/api/v1/query_range", params)
 
 
 def query_instant(
@@ -308,32 +283,7 @@ def query_instant(
     else:
         params["time"] = _parse_time("now")
 
-    with _get_client(instance_name) as client:
-        response = client.get("/loki/api/v1/query", params=params)
-        response.raise_for_status()
-
-        data = response.json()
-
-        if data.get("status") != "success":
-            raise ValueError(
-                f"Loki query failed: {data.get('error', 'Unknown error')}"
-            )
-
-        # Parse the results
-        results = []
-        for stream in data.get("data", {}).get("result", []):
-            labels = stream.get("stream", {})
-            for value in stream.get("values", []):
-                timestamp, line = value
-                results.append(
-                    {
-                        "timestamp": timestamp,
-                        "labels": labels,
-                        "line": line,
-                    }
-                )
-
-        return results
+    return _query_api(instance_name, "/loki/api/v1/query", params)
 
 
 def get_labels(
@@ -351,24 +301,13 @@ def get_labels(
     Returns:
         List of label names.
     """
-    with _get_client(instance_name) as client:
-        params: dict[str, str] = {}
-        if start:
-            params["start"] = _parse_time(start)
-        if end:
-            params["end"] = _parse_time(end)
+    params: dict[str, str] = {}
+    if start:
+        params["start"] = _parse_time(start)
+    if end:
+        params["end"] = _parse_time(end)
 
-        response = client.get("/loki/api/v1/labels", params=params)
-        response.raise_for_status()
-
-        data = response.json()
-
-        if data.get("status") != "success":
-            raise ValueError(
-                f"Failed to get labels: {data.get('error', 'Unknown error')}"
-            )
-
-        return data["data"]
+    return _query_labels_api(instance_name, "/loki/api/v1/labels", params)
 
 
 def get_label_values(
@@ -388,21 +327,11 @@ def get_label_values(
     Returns:
         List of label values.
     """
-    with _get_client(instance_name) as client:
-        params: dict[str, str] = {}
-        if start:
-            params["start"] = _parse_time(start)
-        if end:
-            params["end"] = _parse_time(end)
+    params: dict[str, str] = {}
+    if start:
+        params["start"] = _parse_time(start)
+    if end:
+        params["end"] = _parse_time(end)
 
-        response = client.get(f"/loki/api/v1/label/{label}/values", params=params)
-        response.raise_for_status()
-
-        data = response.json()
-
-        if data.get("status") != "success":
-            raise ValueError(
-                f"Failed to get label values: {data.get('error', 'Unknown error')}"
-            )
-
-        return data["data"]
+    path = f"/loki/api/v1/label/{label}/values"
+    return _query_labels_api(instance_name, path, params)

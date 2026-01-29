@@ -18,6 +18,7 @@ type Config struct {
 	Plugins        map[string]yaml.Node `yaml:"plugins"`
 	Auth           AuthConfig           `yaml:"auth"`
 	Sandbox        SandboxConfig        `yaml:"sandbox"`
+	Proxy          ProxyConfig          `yaml:"proxy"`
 	Storage        *StorageConfig       `yaml:"storage,omitempty"`
 	Observability  ObservabilityConfig  `yaml:"observability"`
 	SemanticSearch SemanticSearchConfig `yaml:"semantic_search"`
@@ -108,6 +109,20 @@ type StorageConfig struct {
 type ObservabilityConfig struct {
 	MetricsEnabled bool `yaml:"metrics_enabled"`
 	MetricsPort    int  `yaml:"metrics_port"`
+}
+
+// ProxyConfig holds credential proxy configuration.
+// The proxy is always enabled - sandbox containers never receive credentials directly.
+type ProxyConfig struct {
+	// ListenAddr is the address for the proxy to listen on (default: ":18081").
+	ListenAddr string `yaml:"listen_addr,omitempty"`
+
+	// TokenTTL is the duration a per-execution token is valid for (default: 1h).
+	TokenTTL time.Duration `yaml:"token_ttl,omitempty"`
+
+	// SandboxHost is the hostname/IP that sandbox containers should use to reach the proxy.
+	// Defaults to "host.docker.internal".
+	SandboxHost string `yaml:"sandbox_host,omitempty"`
 }
 
 // envVarPattern matches ${VAR_NAME} patterns for environment variable substitution.
@@ -242,6 +257,19 @@ func applyDefaults(cfg *Config) {
 
 	if cfg.Observability.MetricsPort == 0 {
 		cfg.Observability.MetricsPort = 2490
+	}
+
+	// Proxy defaults.
+	if cfg.Proxy.ListenAddr == "" {
+		cfg.Proxy.ListenAddr = ":18081"
+	}
+
+	if cfg.Proxy.TokenTTL == 0 {
+		cfg.Proxy.TokenTTL = 1 * time.Hour
+	}
+
+	if cfg.Proxy.SandboxHost == "" {
+		cfg.Proxy.SandboxHost = "host.docker.internal"
 	}
 
 	// Semantic search defaults.

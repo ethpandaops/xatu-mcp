@@ -109,13 +109,13 @@ plugins:
 sandbox:
   # Backend: docker (local dev) | gvisor (production)
   backend: docker
-  image: "mcp-sandbox:latest"
+  image: "ethpandaops-mcp-sandbox:latest"
   timeout: 60  # seconds
   memory_limit: "2g"
   cpu_limit: 1.0
   # Network for sandbox containers. In stdio mode (outside docker-compose),
   # the server auto-creates this network if it doesn't exist.
-  network: "mcp-internal"
+  network: "ethpandaops-mcp-internal"
   # host_shared_path: "/tmp/mcp-sandbox"  # Docker-in-Docker: host-visible path for bind mounts
 
   # Sessions configuration (optional)
@@ -133,7 +133,7 @@ storage:
   endpoint: "${S3_ENDPOINT}"  # e.g., http://minio:9000 or https://xxx.r2.cloudflarestorage.com
   access_key: "${S3_ACCESS_KEY}"
   secret_key: "${S3_SECRET_KEY}"
-  bucket: "mcp-outputs"
+  bucket: "ethpandaops-mcp-outputs"
   region: "us-east-1"
   public_url_prefix: "${S3_PUBLIC_URL}"  # e.g., https://outputs.example.com
 
@@ -155,6 +155,14 @@ auth:
   # JWT token configuration
   # tokens:
   #   secret_key: "${JWT_SECRET_KEY}"  # Required when auth is enabled
+
+# Credential proxy configuration (optional)
+# The credential proxy runs automatically to protect datasource credentials.
+# Sandbox containers never receive credentials directly - they connect via the proxy.
+# proxy:
+#   listen_addr: ":18081"  # Address for proxy to listen on
+#   token_ttl: 1h          # How long per-execution tokens are valid
+#   sandbox_host: "host.docker.internal"  # Hostname/IP for sandbox containers to reach proxy
 
 # Observability configuration
 observability:
