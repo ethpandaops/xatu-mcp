@@ -1,0 +1,60 @@
+# ResourceQuota to limit sandbox namespace resource consumption
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: sandbox-limits
+  namespace: mcp-sandboxes
+  labels:
+    app.kubernetes.io/name: ethpandaops-mcp
+    app.kubernetes.io/component: resource-quota
+spec:
+  hard:
+    # Limit total pods
+    pods: "100"
+    # Limit total CPU requests and limits
+    requests.cpu: "50"
+    limits.cpu: "100"
+    # Limit total memory requests and limits
+    requests.memory: "50Gi"
+    limits.memory: "200Gi"
+    # Limit ephemeral storage
+    requests.ephemeral-storage: "100Gi"
+    limits.ephemeral-storage: "200Gi"
+---
+# LimitRange to set default and max limits for sandbox pods
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: sandbox-limit-range
+  namespace: mcp-sandboxes
+  labels:
+    app.kubernetes.io/name: ethpandaops-mcp
+    app.kubernetes.io/component: limit-range
+spec:
+  limits:
+    - type: Container
+      # Default limits if not specified
+      default:
+        memory: "2Gi"
+        cpu: "1"
+        ephemeral-storage: "2Gi"
+      # Default requests if not specified
+      defaultRequest:
+        memory: "128Mi"
+        cpu: "100m"
+        ephemeral-storage: "100Mi"
+      # Maximum limits per container
+      max:
+        memory: "4Gi"
+        cpu: "2"
+        ephemeral-storage: "5Gi"
+      # Minimum limits per container
+      min:
+        memory: "64Mi"
+        cpu: "50m"
+        ephemeral-storage: "10Mi"
+    - type: Pod
+      # Maximum limits per pod
+      max:
+        memory: "4Gi"
+        cpu: "2"

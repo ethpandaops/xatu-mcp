@@ -1,4 +1,4 @@
-.PHONY: build test lint clean docker docker-push docker-sandbox test-sandbox run help download-models clean-models
+.PHONY: build test lint clean docker docker-push docker-sandbox test-sandbox run help download-models clean-models kind-setup kind-test kind-teardown kind-logs kind-pods
 
 # Embedding model and shared library configuration
 # Downloaded from HuggingFace and kelindar/search GitHub repo
@@ -127,3 +127,24 @@ $(LLAMA_SO_PATH):
 
 clean-models: ## Clean downloaded models
 	rm -rf $(MODELS_DIR)
+
+# Kubernetes testing with KIND
+KIND_CLUSTER_NAME ?= mcp-test
+
+kind-setup: ## Setup KIND cluster and deploy MCP for testing
+	@echo "Setting up KIND cluster for Kubernetes backend testing..."
+	./deploy/kind/setup.sh
+
+kind-test: ## Run tests against KIND cluster
+	@echo "Running tests against KIND cluster..."
+	./deploy/kind/test.sh
+
+kind-teardown: ## Teardown KIND cluster
+	@echo "Tearing down KIND cluster..."
+	./deploy/kind/teardown.sh
+
+kind-logs: ## View MCP server logs in KIND cluster
+	kubectl logs -n ethpandaops-mcp -l app.kubernetes.io/name=ethpandaops-mcp -f
+
+kind-pods: ## List all sandbox pods in KIND cluster
+	kubectl get pods -n mcp-sandboxes -l app.kubernetes.io/managed-by=ethpandaops-mcp

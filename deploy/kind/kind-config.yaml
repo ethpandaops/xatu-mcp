@@ -1,0 +1,30 @@
+# KIND cluster configuration for testing the Kubernetes sandbox backend
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: mcp-test
+nodes:
+  # Control plane node
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      # Expose ingress HTTP
+      - containerPort: 80
+        hostPort: 8080
+        protocol: TCP
+      # Expose ingress HTTPS
+      - containerPort: 443
+        hostPort: 8443
+        protocol: TCP
+      # Expose NodePort range for testing
+      - containerPort: 30000
+        hostPort: 30000
+        protocol: TCP
+  # Worker node for sandbox pods
+  - role: worker
+    labels:
+      sandbox: "true"

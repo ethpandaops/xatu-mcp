@@ -1,0 +1,111 @@
+# Simplified deployment for KIND testing
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ethpandaops-mcp
+  namespace: ethpandaops-mcp
+  labels:
+    app.kubernetes.io/name: ethpandaops-mcp
+    app.kubernetes.io/component: server
+spec:
+  replicas: 1  # Single replica for testing
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ethpandaops-mcp
+      app.kubernetes.io/component: server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ethpandaops-mcp
+        app.kubernetes.io/component: server
+    spec:
+      serviceAccountName: ethpandaops-mcp
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+        - name: mcp-server
+          image: ethpandaops-mcp:test
+          imagePullPolicy: Never  # Use local image
+          args:
+            - serve
+            - -t
+            - sse
+          ports:
+            - name: mcp
+              containerPort: 2480
+              protocol: TCP
+            - name: metrics
+              containerPort: 2490
+              protocol: TCP
+          env:
+            - name: CONFIG_PATH
+              value: /config/config.yaml
+          envFrom:
+            - secretRef:
+                name: ethpandaops-mcp-secrets
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "1Gi"
+              cpu: "1"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: mcp
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: mcp
+            initialDelaySeconds: 10
+            periodSeconds: 10
+
+      volumes:
+        - name: config
+          configMap:
+            name: ethpandaops-mcp-config
+---
+# NodePort service for easy access in KIND
+apiVersion: v1
+kind: Service
+metadata:
+  name: ethpandaops-mcp
+  namespace: ethpandaops-mcp
+  labels:
+    app.kubernetes.io/name: ethpandaops-mcp
+    app.kubernetes.io/component: server
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: ethpandaops-mcp
+    app.kubernetes.io/component: server
+  ports:
+    - name: mcp
+      port: 2480
+      targetPort: mcp
+      nodePort: 30000
+      protocol: TCP
+    - name: metrics
+      port: 2490
+      targetPort: metrics
+      protocol: TCP

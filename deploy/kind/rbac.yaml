@@ -1,0 +1,82 @@
+# ServiceAccount for the MCP server
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ethpandaops-mcp
+  namespace: ethpandaops-mcp
+  labels:
+    app.kubernetes.io/name: ethpandaops-mcp
+    app.kubernetes.io/component: server
+---
+# ClusterRole to read namespace (needed for startup check)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sandbox-namespace-reader
+  labels:
+    app.kubernetes.io/name: ethpandaops-mcp
+    app.kubernetes.io/component: rbac
+rules:
+  # Read namespace to verify it exists on startup
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get"]
+    resourceNames: ["mcp-sandboxes"]
+---
+# ClusterRoleBinding for namespace reading
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: mcp-sandbox-namespace-reader
+  labels:
+    app.kubernetes.io/name: ethpandaops-mcp
+    app.kubernetes.io/component: rbac
+subjects:
+  - kind: ServiceAccount
+    name: ethpandaops-mcp
+    namespace: ethpandaops-mcp
+roleRef:
+  kind: ClusterRole
+  name: sandbox-namespace-reader
+  apiGroup: rbac.authorization.k8s.io
+---
+# Role to manage sandbox pods in the sandboxes namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sandbox-manager
+  namespace: mcp-sandboxes
+  labels:
+    app.kubernetes.io/name: ethpandaops-mcp
+    app.kubernetes.io/component: rbac
+rules:
+  # Pod lifecycle management
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  # Execute commands in pods
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  # Read pod logs for debugging
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+# Bind the role to the MCP server service account
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mcp-sandbox-manager
+  namespace: mcp-sandboxes
+  labels:
+    app.kubernetes.io/name: ethpandaops-mcp
+    app.kubernetes.io/component: rbac
+subjects:
+  - kind: ServiceAccount
+    name: ethpandaops-mcp
+    namespace: ethpandaops-mcp
+roleRef:
+  kind: Role
+  name: sandbox-manager
+  apiGroup: rbac.authorization.k8s.io

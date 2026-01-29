@@ -37,7 +37,7 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
 # =============================================================================
 # Stage 2: Go builder
 # =============================================================================
-FROM golang:1.24-bookworm AS builder
+FROM golang:1.25-bookworm AS builder
 
 ARG TARGETARCH
 

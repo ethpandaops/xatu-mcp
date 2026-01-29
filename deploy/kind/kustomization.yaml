@@ -1,0 +1,25 @@
+# Kustomization for KIND testing
+# Note: Due to kustomize security restrictions, we inline the necessary base resources
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: ethpandaops-mcp-kind-test
+
+resources:
+  # All resources inlined for KIND testing
+  - namespace.yaml
+  - rbac.yaml
+  - resourcequota.yaml
+  - test-secret.yaml
+  - test-configmap.yaml
+  - test-deployment.yaml
+
+# Use local images for testing
+images:
+  - name: ethpandaops-mcp
+    newName: ethpandaops-mcp
+    newTag: test
+  - name: ethpandaops-mcp-sandbox
+    newName: ethpandaops-mcp-sandbox
+    newTag: test

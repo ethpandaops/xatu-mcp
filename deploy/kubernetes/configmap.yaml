@@ -1,0 +1,96 @@
+# ConfigMap for MCP server configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ethpandaops-mcp-config
+  namespace: ethpandaops-mcp
+  labels:
+    app.kubernetes.io/name: ethpandaops-mcp
+    app.kubernetes.io/component: config
+data:
+  config.yaml: |
+    server:
+      host: "0.0.0.0"
+      port: 2480
+      base_url: "${MCP_BASE_URL}"
+
+    plugins:
+      clickhouse:
+        clusters:
+          - name: "xatu"
+            description: |
+              Main Xatu ClickHouse cluster with raw Ethereum event data.
+            host: "${CLICKHOUSE_XATU_HOST}"
+            database: "${CLICKHOUSE_XATU_DATABASE}"
+            username: "${CLICKHOUSE_XATU_USERNAME}"
+            password: "${CLICKHOUSE_XATU_PASSWORD}"
+            secure: true
+            timeout: 120
+        schema_discovery:
+          refresh_interval: 15m
+          datasources:
+            - name: "xatu"
+              cluster: "xatu"
+
+      prometheus:
+        instances:
+          - name: "ethpandaops"
+            description: |
+              Prometheus/VictoriaMetrics for infrastructure metrics.
+            url: "${PROMETHEUS_URL}"
+            username: "${PROMETHEUS_USERNAME}"
+            password: "${PROMETHEUS_PASSWORD}"
+            timeout: 60
+
+      loki:
+        instances:
+          - name: "ethpandaops"
+            description: |
+              Loki cluster for beacon node and validator logs.
+            url: "${LOKI_URL}"
+            username: "${LOKI_USERNAME}"
+            password: "${LOKI_PASSWORD}"
+            timeout: 60
+
+    sandbox:
+      backend: kubernetes
+      image: "ghcr.io/ethpandaops/mcp-sandbox:latest"
+      timeout: 60
+      memory_limit: "2g"
+      cpu_limit: 1.0
+
+      kubernetes:
+        namespace: "mcp-sandboxes"
+        # Optional: Use gVisor RuntimeClass for additional isolation
+        # runtime_class: "gvisor"
+        labels:
+          app.kubernetes.io/part-of: ethpandaops-mcp
+
+      sessions:
+        enabled: true
+        ttl: 30m
+        max_duration: 4h
+        max_sessions: 10
+
+    storage:
+      endpoint: "${S3_ENDPOINT}"
+      access_key: "${S3_ACCESS_KEY}"
+      secret_key: "${S3_SECRET_KEY}"
+      bucket: "ethpandaops-mcp-outputs"
+      region: "us-east-1"
+      public_url_prefix: "${S3_PUBLIC_URL}"
+
+    auth:
+      enabled: false
+      # Uncomment to enable GitHub OAuth
+      # github:
+      #   client_id: "${GITHUB_CLIENT_ID}"
+      #   client_secret: "${GITHUB_CLIENT_SECRET}"
+      # allowed_orgs:
+      #   - "ethpandaops"
+      # tokens:
+      #   secret_key: "${JWT_SECRET_KEY}"
+
+    observability:
+      metrics_enabled: true
+      metrics_port: 2490

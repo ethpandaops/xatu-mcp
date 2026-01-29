@@ -1,0 +1,51 @@
+# Simplified ConfigMap for KIND testing
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ethpandaops-mcp-config
+  namespace: ethpandaops-mcp
+  labels:
+    app.kubernetes.io/name: ethpandaops-mcp
+    app.kubernetes.io/component: config
+data:
+  config.yaml: |
+    server:
+      host: "0.0.0.0"
+      port: 2480
+      base_url: "http://localhost:30000"
+
+    # Minimal plugin config for testing
+    plugins: {}
+
+    sandbox:
+      backend: kubernetes
+      image: "ethpandaops-mcp-sandbox:test"
+      timeout: 60
+      memory_limit: "512m"
+      cpu_limit: 0.5
+
+      kubernetes:
+        namespace: "mcp-sandboxes"
+        labels:
+          app.kubernetes.io/part-of: ethpandaops-mcp
+          test: "true"
+
+      sessions:
+        enabled: true
+        ttl: 10m
+        max_duration: 30m
+        max_sessions: 5
+
+    # No external storage for basic tests
+    # storage: {}
+
+    auth:
+      enabled: false
+
+    observability:
+      metrics_enabled: true
+      metrics_port: 2490
+
+    # Disable semantic search for testing
+    # semantic_search:
+    #   model_path: ""

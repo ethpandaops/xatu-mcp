@@ -1,0 +1,59 @@
+# Service for the MCP server
+apiVersion: v1
+kind: Service
+metadata:
+  name: ethpandaops-mcp
+  namespace: ethpandaops-mcp
+  labels:
+    app.kubernetes.io/name: ethpandaops-mcp
+    app.kubernetes.io/component: server
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: ethpandaops-mcp
+    app.kubernetes.io/component: server
+  ports:
+    - name: mcp
+      port: 2480
+      targetPort: mcp
+      protocol: TCP
+    - name: metrics
+      port: 2490
+      targetPort: metrics
+      protocol: TCP
+---
+# Ingress for external access
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ethpandaops-mcp
+  namespace: ethpandaops-mcp
+  labels:
+    app.kubernetes.io/name: ethpandaops-mcp
+    app.kubernetes.io/component: server
+  annotations:
+    # Nginx ingress annotations for SSE support
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
+    # Enable websocket support
+    nginx.ingress.kubernetes.io/websocket-services: "ethpandaops-mcp"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: mcp.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ethpandaops-mcp
+                port:
+                  number: 2480
+  # Uncomment for TLS
+  # tls:
+  #   - hosts:
+  #       - mcp.example.com
+  #     secretName: mcp-tls

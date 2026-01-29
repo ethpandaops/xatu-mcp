@@ -1,0 +1,67 @@
+# ServiceMonitor for Prometheus Operator
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ethpandaops-mcp
+  namespace: ethpandaops-mcp
+  labels:
+    app.kubernetes.io/name: ethpandaops-mcp
+    app.kubernetes.io/component: monitoring
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ethpandaops-mcp
+      app.kubernetes.io/component: server
+  endpoints:
+    - port: metrics
+      interval: 30s
+      path: /metrics
+---
+# PrometheusRule for alerting
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: ethpandaops-mcp
+  namespace: ethpandaops-mcp
+  labels:
+    app.kubernetes.io/name: ethpandaops-mcp
+    app.kubernetes.io/component: monitoring
+spec:
+  groups:
+    - name: ethpandaops-mcp
+      rules:
+        - alert: MCPServerDown
+          expr: up{job="ethpandaops-mcp"} == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "MCP server {{ $labels.pod }} is down"
+            description: "MCP server pod {{ $labels.pod }} has been unreachable for more than 1 minute."
+
+        - alert: MCPHighSessionCount
+          expr: mcp_active_sessions > 15
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High session count on {{ $labels.pod }}"
+            description: "MCP server {{ $labels.pod }} has {{ $value }} active sessions."
+
+        - alert: MCPHighExecutionLatency
+          expr: histogram_quantile(0.95, rate(mcp_execution_duration_seconds_bucket[5m])) > 30
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High execution latency"
+            description: "95th percentile execution latency is {{ $value }}s."
+
+        - alert: MCPExecutionErrors
+          expr: rate(mcp_execution_errors_total[5m]) > 0.1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Elevated execution error rate"
+            description: "Execution error rate is {{ $value }} errors/second."

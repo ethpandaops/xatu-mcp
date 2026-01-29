@@ -1,0 +1,78 @@
+# NetworkPolicy for sandbox pod isolation
+# Restricts sandbox pods to only:
+# - Receive exec connections from MCP server
+# - Make outbound connections to datasources (HTTPS) and DNS
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sandbox-isolation
+  namespace: mcp-sandboxes
+  labels:
+    app.kubernetes.io/name: ethpandaops-mcp
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/managed-by: ethpandaops-mcp
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow exec connections from MCP server pods only
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              app.kubernetes.io/name: ethpandaops-mcp
+              app.kubernetes.io/component: server
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ethpandaops-mcp
+  egress:
+    # Allow DNS resolution
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Allow HTTPS connections to datasources (ClickHouse, Prometheus, Loki, S3)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            # Exclude private networks for additional security
+            # Uncomment if you want to restrict to external only
+            # except:
+            #   - 10.0.0.0/8
+            #   - 172.16.0.0/12
+            #   - 192.168.0.0/16
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 8443  # ClickHouse HTTPS
+          protocol: TCP
+        - port: 9000  # S3/MinIO
+          protocol: TCP
+        - port: 9090  # Prometheus (if internal)
+          protocol: TCP
+        - port: 3100  # Loki (if internal)
+          protocol: TCP
+---
+# Default deny for sandbox namespace
+# This ensures any pod without explicit policy is isolated
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: mcp-sandboxes
+  labels:
+    app.kubernetes.io/name: ethpandaops-mcp
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress

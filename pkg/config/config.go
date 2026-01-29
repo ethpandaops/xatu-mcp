@@ -72,6 +72,36 @@ type SandboxConfig struct {
 
 	// Session configuration for persistent execution environments.
 	Sessions SessionConfig `yaml:"sessions"`
+
+	// Kubernetes-specific configuration (only used when backend is "kubernetes").
+	Kubernetes KubernetesConfig `yaml:"kubernetes,omitempty"`
+}
+
+// KubernetesConfig holds Kubernetes-specific sandbox configuration.
+type KubernetesConfig struct {
+	// Namespace where sandbox pods will be created.
+	Namespace string `yaml:"namespace"`
+	// RuntimeClassName for sandbox pods (e.g., "gvisor" for additional isolation).
+	RuntimeClassName string `yaml:"runtime_class,omitempty"`
+	// ServiceAccountName for sandbox pods (if they need specific permissions).
+	ServiceAccountName string `yaml:"service_account,omitempty"`
+	// NodeSelector for scheduling sandbox pods to specific nodes.
+	NodeSelector map[string]string `yaml:"node_selector,omitempty"`
+	// Tolerations for sandbox pods to tolerate node taints.
+	Tolerations []TolerationConfig `yaml:"tolerations,omitempty"`
+	// Labels to apply to all sandbox pods.
+	Labels map[string]string `yaml:"labels,omitempty"`
+	// Annotations to apply to all sandbox pods.
+	Annotations map[string]string `yaml:"annotations,omitempty"`
+}
+
+// TolerationConfig represents a Kubernetes toleration.
+type TolerationConfig struct {
+	Key               string `yaml:"key,omitempty"`
+	Operator          string `yaml:"operator,omitempty"`
+	Value             string `yaml:"value,omitempty"`
+	Effect            string `yaml:"effect,omitempty"`
+	TolerationSeconds *int64 `yaml:"toleration_seconds,omitempty"`
 }
 
 // SessionConfig holds configuration for persistent sandbox sessions.
@@ -287,6 +317,11 @@ func applyDefaults(cfg *Config) {
 			cfg.SemanticSearch.ModelPath = localPath
 		}
 	}
+
+	// Kubernetes sandbox defaults.
+	if cfg.Sandbox.Kubernetes.Namespace == "" {
+		cfg.Sandbox.Kubernetes.Namespace = "mcp-sandboxes"
+	}
 }
 
 func fileExists(path string) bool {
@@ -306,6 +341,13 @@ func (c *Config) Validate() error {
 	// Validate sandbox timeout is within bounds.
 	if c.Sandbox.Timeout > MaxSandboxTimeout {
 		return fmt.Errorf("sandbox.timeout cannot exceed %d seconds", MaxSandboxTimeout)
+	}
+
+	// Validate Kubernetes backend configuration.
+	if c.Sandbox.Backend == "kubernetes" {
+		if c.Sandbox.Kubernetes.Namespace == "" {
+			return errors.New("sandbox.kubernetes.namespace is required when using kubernetes backend")
+		}
 	}
 
 	return nil
