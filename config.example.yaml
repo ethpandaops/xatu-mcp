@@ -156,6 +156,14 @@ auth:
   # tokens:
   #   secret_key: "${JWT_SECRET_KEY}"  # Required when auth is enabled
 
+# Credential proxy configuration (optional)
+# The credential proxy runs automatically to protect datasource credentials.
+# Sandbox containers never receive credentials directly - they connect via the proxy.
+# proxy:
+#   listen_addr: ":8081"   # Address for proxy to listen on
+#   token_ttl: 1h          # How long per-execution tokens are valid
+#   sandbox_host: "host.docker.internal"  # Hostname/IP for sandbox containers to reach proxy
+
 # Observability configuration
 observability:
   metrics_enabled: true

@@ -9,6 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/ethpandaops/mcp/pkg/plugin"
+	"github.com/ethpandaops/mcp/pkg/proxy/handlers"
 	"github.com/ethpandaops/mcp/pkg/types"
 )
 
@@ -49,17 +50,50 @@ func (p *Plugin) Validate() error {
 	return nil
 }
 
+// SandboxEnv returns credential-free environment variables for the sandbox.
+// Credentials are never passed to sandbox containers - they connect via
+// the credential proxy instead.
 func (p *Plugin) SandboxEnv() (map[string]string, error) {
 	if len(p.cfg.Instances) == 0 {
 		return nil, nil
 	}
-	lokiConfigs, err := json.Marshal(p.cfg.Instances)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling Loki configs: %w", err)
+
+	// Only return the list of datasource names, not credentials.
+	names := make([]string, 0, len(p.cfg.Instances))
+	for _, inst := range p.cfg.Instances {
+		names = append(names, inst.Name)
 	}
+
+	namesJSON, err := json.Marshal(names)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling Loki datasource names: %w", err)
+	}
+
 	return map[string]string{
-		"ETHPANDAOPS_LOKI_CONFIGS": string(lokiConfigs),
+		"ETHPANDAOPS_LOKI_DATASOURCES": string(namesJSON),
 	}, nil
+}
+
+// ProxyConfig returns the configuration needed by the credential proxy.
+func (p *Plugin) ProxyConfig() any {
+	if len(p.cfg.Instances) == 0 {
+		return nil
+	}
+
+	configs := make([]handlers.LokiConfig, 0, len(p.cfg.Instances))
+
+	for _, inst := range p.cfg.Instances {
+		configs = append(configs, handlers.LokiConfig{
+			Name:       inst.Name,
+			URL:        inst.URL,
+			Username:   inst.Username,
+			Password:   inst.Password,
+			SkipVerify: inst.SkipVerify,
+			Timeout:    inst.Timeout,
+		})
+	}
+
+	return configs
 }
 
 func (p *Plugin) DatasourceInfo() []types.DatasourceInfo {

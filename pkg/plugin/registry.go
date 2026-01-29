@@ -123,8 +123,9 @@ func (r *Registry) StopAll(ctx context.Context) {
 	}
 }
 
-// SandboxEnv aggregates sandbox environment variables from all
-// initialized plugins.
+// SandboxEnv aggregates credential-free sandbox environment variables
+// from all initialized plugins. Credentials are never passed to sandbox
+// containers - they connect via the credential proxy instead.
 func (r *Registry) SandboxEnv() (map[string]string, error) {
 	r.mu.RLock()
 	plugins := make([]Plugin, len(r.initialized))

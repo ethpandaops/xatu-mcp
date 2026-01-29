@@ -358,7 +358,7 @@ func (b *DockerBackend) executeWithNewSession(ctx context.Context, req ExecuteRe
 	}
 
 	// Execute the code in the session.
-	result, err := b.execInContainer(ctx, session, req.Code, timeout)
+	result, err := b.execInContainer(ctx, session, req.Code, timeout, req.Env)
 	if err != nil {
 		return nil, fmt.Errorf("executing in session: %w", err)
 	}
@@ -392,7 +392,7 @@ func (b *DockerBackend) executeInSession(ctx context.Context, req ExecuteRequest
 	log.Debug("Executing in existing session")
 
 	// Execute the code in the session.
-	result, err := b.execInContainer(ctx, session, req.Code, timeout)
+	result, err := b.execInContainer(ctx, session, req.Code, timeout, req.Env)
 	if err != nil {
 		return nil, fmt.Errorf("executing in session: %w", err)
 	}
@@ -411,7 +411,7 @@ func (b *DockerBackend) createSessionContainer(ctx context.Context, sessionID st
 	// Merge environment variables with defaults.
 	containerEnv := SandboxEnvDefaults()
 
-	for k, v := range env {
+	for k, v := range filterSessionEnv(env) {
 		containerEnv[k] = v
 	}
 
@@ -478,6 +478,22 @@ func (b *DockerBackend) createSessionContainer(ctx context.Context, sessionID st
 	return resp.ID, nil
 }
 
+func filterSessionEnv(env map[string]string) map[string]string {
+	if env == nil {
+		return nil
+	}
+
+	filtered := make(map[string]string, len(env))
+	for k, v := range env {
+		if k == "ETHPANDAOPS_PROXY_TOKEN" {
+			continue
+		}
+		filtered[k] = v
+	}
+
+	return filtered
+}
+
 // createSessionDirs creates the workspace and output directories inside a session container.
 func (b *DockerBackend) createSessionDirs(ctx context.Context, containerID string) error {
 	// Create directories and set permissions so nobody user can write.
@@ -507,6 +523,7 @@ func (b *DockerBackend) execInContainer(
 	session *Session,
 	code string,
 	timeout time.Duration,
+	env map[string]string,
 ) (*ExecutionResult, error) {
 	executionID := uuid.New().String()
 	log := b.log.WithFields(logrus.Fields{
@@ -542,10 +559,20 @@ func (b *DockerBackend) execInContainer(
 	// Execute the script with ETHPANDAOPS_EXECUTION_ID env var for storage.upload().
 	startTime := time.Now()
 
+	execEnv := make([]string, 0, len(env)+1)
+	for k, v := range env {
+		if k == "ETHPANDAOPS_EXECUTION_ID" {
+			continue
+		}
+		execEnv = append(execEnv, k+"="+v)
+	}
+	execEnv = append(execEnv, "ETHPANDAOPS_EXECUTION_ID="+executionID)
+
 	execConfig := container.ExecOptions{
-		Cmd:          []string{"sh", "-c", fmt.Sprintf("ETHPANDAOPS_EXECUTION_ID=%s python %s", executionID, scriptPath)},
+		Cmd:          []string{"python", scriptPath},
 		AttachStdout: true,
 		AttachStderr: true,
+		Env:          execEnv,
 	}
 
 	execResp, err := b.client.ContainerExecCreate(execCtx, session.ContainerID, execConfig)

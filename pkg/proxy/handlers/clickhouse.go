@@ -1,0 +1,164 @@
+// Package handlers provides reverse proxy handlers for each datasource type.
+package handlers
+
+import (
+	"context"
+	"crypto/tls"
+	"fmt"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/sirupsen/logrus"
+)
+
+// ClickHouseConfig holds ClickHouse proxy configuration for a single cluster.
+type ClickHouseConfig struct {
+	Name       string
+	Host       string
+	Port       int
+	Database   string
+	Username   string
+	Password   string
+	Secure     bool
+	SkipVerify bool
+	Timeout    int
+}
+
+// ClickHouseHandler handles requests to ClickHouse clusters.
+type ClickHouseHandler struct {
+	log      logrus.FieldLogger
+	clusters map[string]*clickhouseCluster
+}
+
+type clickhouseCluster struct {
+	cfg   ClickHouseConfig
+	proxy *httputil.ReverseProxy
+}
+
+// NewClickHouseHandler creates a new ClickHouse handler.
+func NewClickHouseHandler(log logrus.FieldLogger, configs []ClickHouseConfig) *ClickHouseHandler {
+	h := &ClickHouseHandler{
+		log:      log.WithField("handler", "clickhouse"),
+		clusters: make(map[string]*clickhouseCluster, len(configs)),
+	}
+
+	for _, cfg := range configs {
+		h.clusters[cfg.Name] = h.createCluster(cfg)
+	}
+
+	return h
+}
+
+func (h *ClickHouseHandler) createCluster(cfg ClickHouseConfig) *clickhouseCluster {
+	// Build target URL.
+	scheme := "https"
+	if !cfg.Secure {
+		scheme = "http"
+	}
+
+	targetURL := &url.URL{
+		Scheme: scheme,
+		Host:   fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
+	}
+
+	// Create reverse proxy.
+	rp := httputil.NewSingleHostReverseProxy(targetURL)
+
+	// Configure transport with TLS settings.
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: cfg.SkipVerify, //nolint:gosec // User-configured
+		},
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 10,
+		IdleConnTimeout:     90 * time.Second,
+	}
+	rp.Transport = transport
+
+	// Customize the director to add auth and database.
+	originalDirector := rp.Director
+	rp.Director = func(req *http.Request) {
+		originalDirector(req)
+
+		// Add basic auth.
+		if cfg.Username != "" {
+			req.SetBasicAuth(cfg.Username, cfg.Password)
+		}
+
+		// Add default database as query param if not already set.
+		q := req.URL.Query()
+		if q.Get("database") == "" && cfg.Database != "" {
+			q.Set("database", cfg.Database)
+		}
+
+		req.URL.RawQuery = q.Encode()
+
+		// Remove the Authorization header from sandbox (we handle auth).
+		req.Header.Del("Authorization")
+	}
+
+	// Error handler.
+	rp.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, err error) {
+		h.log.WithError(err).WithField("cluster", cfg.Name).Error("Proxy error")
+		http.Error(w, fmt.Sprintf("proxy error: %v", err), http.StatusBadGateway)
+	}
+
+	return &clickhouseCluster{
+		cfg:   cfg,
+		proxy: rp,
+	}
+}
+
+// ServeHTTP handles requests of the form /clickhouse/{cluster}/{path...}
+func (h *ClickHouseHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Extract cluster name from path.
+	// Path format: /clickhouse/{cluster}/... or /clickhouse/{cluster}
+	pathParts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/clickhouse/"), "/", 2)
+	if len(pathParts) == 0 || pathParts[0] == "" {
+		http.Error(w, "missing cluster name in path", http.StatusBadRequest)
+		return
+	}
+
+	clusterName := pathParts[0]
+	cluster, ok := h.clusters[clusterName]
+
+	if !ok {
+		http.Error(w, fmt.Sprintf("unknown cluster: %s", clusterName), http.StatusNotFound)
+		return
+	}
+
+	// Rewrite path to remove /clickhouse/{cluster} prefix.
+	remainingPath := "/"
+	if len(pathParts) > 1 {
+		remainingPath = "/" + pathParts[1]
+	}
+
+	r.URL.Path = remainingPath
+
+	if cluster.cfg.Timeout > 0 {
+		timeoutCtx, cancel := context.WithTimeout(r.Context(), time.Duration(cluster.cfg.Timeout)*time.Second)
+		defer cancel()
+		r = r.WithContext(timeoutCtx)
+	}
+
+	h.log.WithFields(logrus.Fields{
+		"cluster": clusterName,
+		"path":    remainingPath,
+		"method":  r.Method,
+	}).Debug("Proxying ClickHouse request")
+
+	cluster.proxy.ServeHTTP(w, r)
+}
+
+// Clusters returns the list of configured cluster names.
+func (h *ClickHouseHandler) Clusters() []string {
+	names := make([]string, 0, len(h.clusters))
+	for name := range h.clusters {
+		names = append(names, name)
+	}
+
+	return names
+}

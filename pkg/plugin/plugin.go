@@ -32,9 +32,15 @@ type Plugin interface {
 	// Validate checks that the parsed config is valid.
 	Validate() error
 
-	// SandboxEnv returns environment variables to inject into
-	// the sandbox container for this plugin's Python module.
+	// SandboxEnv returns credential-free environment variables for the sandbox.
+	// Credentials are never passed to sandbox containers - they connect via
+	// the credential proxy instead.
 	SandboxEnv() (map[string]string, error)
+
+	// ProxyConfig returns configuration for the credential proxy.
+	// The returned value should be a slice of config structs appropriate
+	// for the plugin type (e.g., []handlers.ClickHouseConfig).
+	ProxyConfig() any
 
 	// DatasourceInfo returns metadata about configured datasources
 	// for the datasources:// MCP resource.

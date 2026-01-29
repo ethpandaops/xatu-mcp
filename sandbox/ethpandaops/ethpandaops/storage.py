@@ -1,7 +1,8 @@
-"""S3-compatible storage for output files.
+"""S3-compatible storage for output files via credential proxy.
 
 This module provides functions to upload files to S3-compatible storage
-and get public URLs for sharing.
+and get public URLs for sharing. All requests go through the credential
+proxy - credentials are never exposed to sandbox containers.
 
 Example:
     from ethpandaops import storage
@@ -17,31 +18,33 @@ Example:
 import os
 from pathlib import Path
 
-import boto3
-from botocore.config import Config
+import httpx
 
-_S3_ENDPOINT = os.environ.get("ETHPANDAOPS_S3_ENDPOINT", "")
-_S3_ACCESS_KEY = os.environ.get("ETHPANDAOPS_S3_ACCESS_KEY", "")
-_S3_SECRET_KEY = os.environ.get("ETHPANDAOPS_S3_SECRET_KEY", "")
+# Proxy configuration (required).
+_PROXY_URL = os.environ.get("ETHPANDAOPS_PROXY_URL", "")
+_PROXY_TOKEN = os.environ.get("ETHPANDAOPS_PROXY_TOKEN", "")
+
+# S3 configuration.
 _S3_BUCKET = os.environ.get("ETHPANDAOPS_S3_BUCKET", "mcp-outputs")
-_S3_REGION = os.environ.get("ETHPANDAOPS_S3_REGION", "us-east-1")
 _S3_PUBLIC_URL_PREFIX = os.environ.get("ETHPANDAOPS_S3_PUBLIC_URL_PREFIX", "")
 
 
-def _get_client():
-    """Get or create S3 client."""
-    if not _S3_ENDPOINT:
+def _check_proxy_config() -> None:
+    """Verify proxy is configured."""
+    if not _PROXY_URL or not _PROXY_TOKEN:
         raise ValueError(
-            "S3 storage not configured. Set ETHPANDAOPS_S3_ENDPOINT environment variable."
+            "Proxy not configured. ETHPANDAOPS_PROXY_URL and ETHPANDAOPS_PROXY_TOKEN are required."
         )
 
-    return boto3.client(
-        "s3",
-        endpoint_url=_S3_ENDPOINT,
-        aws_access_key_id=_S3_ACCESS_KEY,
-        aws_secret_access_key=_S3_SECRET_KEY,
-        region_name=_S3_REGION,
-        config=Config(signature_version="s3v4"),
+
+def _get_client() -> httpx.Client:
+    """Get an HTTP client configured for the proxy."""
+    _check_proxy_config()
+
+    return httpx.Client(
+        base_url=_PROXY_URL,
+        headers={"Authorization": f"Bearer {_PROXY_TOKEN}"},
+        timeout=httpx.Timeout(connect=5.0, read=300.0, write=300.0, pool=5.0),
     )
 
 
@@ -57,7 +60,7 @@ def upload(local_path: str, remote_name: str | None = None) -> str:
 
     Raises:
         FileNotFoundError: If the local file doesn't exist.
-        ValueError: If S3 is not configured.
+        ValueError: If proxy is not configured.
 
     Example:
         >>> url = upload("/workspace/chart.png")
@@ -71,7 +74,7 @@ def upload(local_path: str, remote_name: str | None = None) -> str:
     if remote_name is None:
         remote_name = path.name
 
-    # Generate a unique key using execution context (set by sandbox)
+    # Generate a unique key using execution context (set by sandbox).
     execution_id = os.environ.get("ETHPANDAOPS_EXECUTION_ID")
     if not execution_id:
         raise ValueError(
@@ -80,27 +83,28 @@ def upload(local_path: str, remote_name: str | None = None) -> str:
         )
     key = f"{execution_id}/{remote_name}"
 
-    client = _get_client()
-
-    # Determine content type
     content_type = _get_content_type(path.suffix)
 
-    # Upload the file
-    with open(path, "rb") as f:
-        client.upload_fileobj(
-            f,
-            _S3_BUCKET,
-            key,
-            ExtraArgs={"ContentType": content_type},
-        )
+    with _get_client() as client:
+        with open(path, "rb") as f:
+            response = client.put(
+                f"/s3/{_S3_BUCKET}/{key}",
+                content=f.read(),
+                headers={"Content-Type": content_type},
+            )
+            response.raise_for_status()
 
-    # Build public URL
+    # Build public URL.
+    return _get_public_url(key)
+
+
+def _get_public_url(key: str) -> str:
+    """Build the public URL for an S3 object."""
     if _S3_PUBLIC_URL_PREFIX:
-        url = f"{_S3_PUBLIC_URL_PREFIX.rstrip('/')}/{key}"
+        return f"{_S3_PUBLIC_URL_PREFIX.rstrip('/')}/{key}"
     else:
-        url = f"{_S3_ENDPOINT.rstrip('/')}/{_S3_BUCKET}/{key}"
-
-    return url
+        # Fallback to proxy URL (won't work for public access, but useful for debugging).
+        return f"{_PROXY_URL.rstrip('/')}/s3/{_S3_BUCKET}/{key}"
 
 
 def _get_content_type(suffix: str) -> str:
@@ -138,19 +142,74 @@ def list_files(prefix: str = "") -> list[dict]:
     Returns:
         List of file info dictionaries with 'key', 'size', 'last_modified'.
     """
-    client = _get_client()
+    _check_proxy_config()
 
-    response = client.list_objects_v2(Bucket=_S3_BUCKET, Prefix=prefix)
+    params: dict[str, str] = {"list-type": "2"}
+    if prefix:
+        params["prefix"] = prefix
 
-    files = []
-    for obj in response.get("Contents", []):
-        files.append({
-            "key": obj["Key"],
-            "size": obj["Size"],
-            "last_modified": obj["LastModified"].isoformat(),
-        })
+    results: list[dict] = []
+    continuation_token: str | None = None
 
-    return files
+    with _get_client() as client:
+        while True:
+            if continuation_token:
+                params["continuation-token"] = continuation_token
+
+            response = client.get(f"/s3/{_S3_BUCKET}", params=params)
+            response.raise_for_status()
+
+            page_results, continuation_token = _parse_list_response(response.text)
+            results.extend(page_results)
+            if not continuation_token:
+                break
+
+    return results
+
+
+def _parse_list_response(xml_text: str) -> tuple[list[dict], str | None]:
+    """Parse S3 list response XML into file info dicts and continuation token."""
+    import xml.etree.ElementTree as ET
+
+    root = ET.fromstring(xml_text)
+
+    namespace = ""
+    if root.tag.startswith("{"):
+        namespace = root.tag.split("}")[0].strip("{")
+
+    def _tag(name: str) -> str:
+        return f"{{{namespace}}}{name}" if namespace else name
+
+    results: list[dict] = []
+    for entry in root.findall(_tag("Contents")):
+        key_elem = entry.find(_tag("Key"))
+        size_elem = entry.find(_tag("Size"))
+        last_modified_elem = entry.find(_tag("LastModified"))
+
+        key = key_elem.text if key_elem is not None and key_elem.text else ""
+        size_text = size_elem.text if size_elem is not None and size_elem.text else "0"
+        last_modified = (
+            last_modified_elem.text
+            if last_modified_elem is not None and last_modified_elem.text
+            else ""
+        )
+
+        try:
+            size = int(size_text)
+        except ValueError:
+            size = 0
+
+        if key:
+            results.append(
+                {"key": key, "size": size, "last_modified": last_modified}
+            )
+
+    is_truncated = root.findtext(_tag("IsTruncated"), default="false").lower()
+    if is_truncated != "true":
+        return results, None
+
+    token = root.findtext(_tag("NextContinuationToken"), default="")
+    return results, token or None
 
 
 def get_url(key: str) -> str:
@@ -162,7 +221,4 @@ def get_url(key: str) -> str:
     Returns:
         Public URL for the file.
     """
-    if _S3_PUBLIC_URL_PREFIX:
-        return f"{_S3_PUBLIC_URL_PREFIX.rstrip('/')}/{key}"
-    else:
-        return f"{_S3_ENDPOINT.rstrip('/')}/{_S3_BUCKET}/{key}"
+    return _get_public_url(key)

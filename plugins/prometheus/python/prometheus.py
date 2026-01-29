@@ -1,7 +1,8 @@
-"""Prometheus metrics access via direct connections.
+"""Prometheus metrics access via credential proxy.
 
-This module provides functions to query Prometheus instances directly
-using the HTTP API.
+This module provides functions to query Prometheus instances. All requests
+go through the credential proxy - credentials are never exposed to sandbox
+containers.
 
 Example:
     from ethpandaops import prometheus
@@ -23,118 +24,58 @@ Example:
 """
 
 import json
-import logging
 import os
 import time as time_module
-from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
 from ethpandaops._time import parse_duration
 
-logger = logging.getLogger(__name__)
+# Proxy configuration (required).
+_PROXY_URL = os.environ.get("ETHPANDAOPS_PROXY_URL", "")
+_PROXY_TOKEN = os.environ.get("ETHPANDAOPS_PROXY_TOKEN", "")
+
+# Cache for datasource names.
+_DATASOURCE_NAMES: list[str] | None = None
 
 
-@dataclass
-class _InstanceConfig:
-    """Internal representation of a Prometheus instance configuration."""
-
-    name: str
-    url: str
-    username: str
-    password: str
-    skip_verify: bool
-    timeout: int
-    description: str
-
-
-# Cache for instance configurations.
-_INSTANCES: dict[str, _InstanceConfig] | None = None
-
-
-def _load_instances() -> None:
-    """Load instance configurations from environment variable."""
-    global _INSTANCES
-
-    if _INSTANCES is not None:
-        return
-
-    raw = os.environ.get("ETHPANDAOPS_PROMETHEUS_CONFIGS", "")
-    if not raw:
+def _check_proxy_config() -> None:
+    """Verify proxy is configured."""
+    if not _PROXY_URL or not _PROXY_TOKEN:
         raise ValueError(
-            "Prometheus not configured. Set ETHPANDAOPS_PROMETHEUS_CONFIGS environment variable."
+            "Proxy not configured. ETHPANDAOPS_PROXY_URL and ETHPANDAOPS_PROXY_TOKEN are required."
         )
+
+
+def _load_datasources() -> list[str]:
+    """Load datasource names from environment variable."""
+    global _DATASOURCE_NAMES
+
+    if _DATASOURCE_NAMES is not None:
+        return _DATASOURCE_NAMES
+
+    raw = os.environ.get("ETHPANDAOPS_PROMETHEUS_DATASOURCES", "")
+    if not raw:
+        _DATASOURCE_NAMES = []
+        return _DATASOURCE_NAMES
 
     try:
-        configs = json.loads(raw)
+        _DATASOURCE_NAMES = json.loads(raw)
     except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid ETHPANDAOPS_PROMETHEUS_CONFIGS JSON: {e}") from e
+        raise ValueError(f"Invalid ETHPANDAOPS_PROMETHEUS_DATASOURCES JSON: {e}") from e
 
-    _INSTANCES = {}
-    for cfg in configs:
-        skip_verify = cfg.get("skip_verify", False)
-        if skip_verify:
-            logger.warning(
-                "TLS certificate verification disabled (skip_verify=true) for %s - vulnerable to MITM attacks",
-                cfg["name"],
-            )
-
-        instance = _InstanceConfig(
-            name=cfg["name"],
-            url=cfg.get("url", "").rstrip("/"),
-            username=cfg.get("username", ""),
-            password=cfg.get("password", ""),
-            skip_verify=skip_verify,
-            timeout=cfg.get("timeout", 60),
-            description=cfg.get("description", ""),
-        )
-        _INSTANCES[instance.name] = instance
+    return _DATASOURCE_NAMES
 
 
-def _get_client(instance_name: str) -> httpx.Client:
-    """Get an HTTP client for a Prometheus instance.
-
-    Args:
-        instance_name: The logical name of the Prometheus instance.
-
-    Returns:
-        An httpx client configured for the instance.
-
-    Raises:
-        ValueError: If the instance is not found.
-    """
-    _load_instances()
-
-    if _INSTANCES is None or instance_name not in _INSTANCES:
-        available = list(_INSTANCES.keys()) if _INSTANCES else []
-        raise ValueError(
-            f"Unknown instance '{instance_name}'. Available instances: {available}"
-        )
-
-    instance = _INSTANCES[instance_name]
-
-    # Configure authentication
-    auth = None
-    if instance.username:
-        auth = (instance.username, instance.password)
-
-    # Configure TLS verification
-    verify = not instance.skip_verify
-
-    # Configure granular timeout (connect, read, write, pool)
-    timeout = httpx.Timeout(
-        connect=5.0,
-        read=float(instance.timeout),
-        write=float(instance.timeout),
-        pool=5.0,
-    )
+def _get_client() -> httpx.Client:
+    """Get an HTTP client configured for the proxy."""
+    _check_proxy_config()
 
     return httpx.Client(
-        base_url=instance.url,
-        auth=auth,
-        timeout=timeout,
-        verify=verify,
+        base_url=_PROXY_URL,
+        headers={"Authorization": f"Bearer {_PROXY_TOKEN}"},
+        timeout=httpx.Timeout(connect=5.0, read=120.0, write=30.0, pool=5.0),
     )
 
 
@@ -149,19 +90,8 @@ def list_datasources() -> list[dict[str, Any]]:
         >>> for inst in instances:
         ...     print(f"{inst['name']}: {inst['description']}")
     """
-    _load_instances()
-
-    if _INSTANCES is None:
-        return []
-
-    return [
-        {
-            "name": inst.name,
-            "description": inst.description,
-            "url": inst.url,
-        }
-        for inst in _INSTANCES.values()
-    ]
+    datasources = _load_datasources()
+    return [{"name": name, "description": "", "url": ""} for name in datasources]
 
 
 def _parse_time(time_str: str) -> int:
@@ -181,19 +111,19 @@ def _parse_time(time_str: str) -> int:
         seconds = parse_duration(duration)
         return int(time_module.time()) - seconds
 
-    # Try Unix timestamp
+    # Try Unix timestamp.
     try:
         return int(time_str)
     except ValueError:
         pass
 
-    # Try float (Unix timestamp with decimals)
+    # Try float (Unix timestamp with decimals).
     try:
         return int(float(time_str))
     except ValueError:
         pass
 
-    # Assume RFC3339
+    # Assume RFC3339.
     from datetime import datetime
 
     try:
@@ -201,6 +131,28 @@ def _parse_time(time_str: str) -> int:
         return int(dt.timestamp())
     except ValueError as e:
         raise ValueError(f"Cannot parse time '{time_str}': {e}") from e
+
+
+def _query_api(instance_name: str, path: str, params: dict[str, str]) -> dict[str, Any]:
+    """Execute a query against the Prometheus API via proxy."""
+    datasources = _load_datasources()
+    if instance_name not in datasources:
+        raise ValueError(
+            f"Unknown instance '{instance_name}'. Available instances: {datasources}"
+        )
+
+    with _get_client() as client:
+        response = client.get(f"/prometheus/{instance_name}{path}", params=params)
+        response.raise_for_status()
+
+        data = response.json()
+
+        if data.get("status") != "success":
+            raise ValueError(
+                f"Prometheus query failed: {data.get('error', 'Unknown error')}"
+            )
+
+        return data["data"]
 
 
 def query(
@@ -229,18 +181,7 @@ def query(
     else:
         params["time"] = str(int(time_module.time()))
 
-    with _get_client(instance_name) as client:
-        response = client.get("/api/v1/query", params=params)
-        response.raise_for_status()
-
-        data = response.json()
-
-        if data.get("status") != "success":
-            raise ValueError(
-                f"Prometheus query failed: {data.get('error', 'Unknown error')}"
-            )
-
-        return data["data"]
+    return _query_api(instance_name, "/api/v1/query", params)
 
 
 def query_range(
@@ -278,18 +219,7 @@ def query_range(
         "step": str(parse_duration(step)),
     }
 
-    with _get_client(instance_name) as client:
-        response = client.get("/api/v1/query_range", params=params)
-        response.raise_for_status()
-
-        data = response.json()
-
-        if data.get("status") != "success":
-            raise ValueError(
-                f"Prometheus query failed: {data.get('error', 'Unknown error')}"
-            )
-
-        return data["data"]
+    return _query_api(instance_name, "/api/v1/query_range", params)
 
 
 def get_labels(instance_name: str) -> list[str]:
@@ -301,18 +231,7 @@ def get_labels(instance_name: str) -> list[str]:
     Returns:
         List of label names.
     """
-    with _get_client(instance_name) as client:
-        response = client.get("/api/v1/labels")
-        response.raise_for_status()
-
-        data = response.json()
-
-        if data.get("status") != "success":
-            raise ValueError(
-                f"Failed to get labels: {data.get('error', 'Unknown error')}"
-            )
-
-        return data["data"]
+    return _query_api(instance_name, "/api/v1/labels", {})
 
 
 def get_label_values(instance_name: str, label: str) -> list[str]:
@@ -325,15 +244,5 @@ def get_label_values(instance_name: str, label: str) -> list[str]:
     Returns:
         List of label values.
     """
-    with _get_client(instance_name) as client:
-        response = client.get(f"/api/v1/label/{label}/values")
-        response.raise_for_status()
-
-        data = response.json()
-
-        if data.get("status") != "success":
-            raise ValueError(
-                f"Failed to get label values: {data.get('error', 'Unknown error')}"
-            )
-
-        return data["data"]
+    path = f"/api/v1/label/{label}/values"
+    return _query_api(instance_name, path, {})
