@@ -119,109 +119,18 @@ func (p *Plugin) PythonAPIDocs() map[string]types.ModuleDoc {
 		"dora": {
 			Description: "Query Dora beacon chain explorer and generate deep links",
 			Functions: map[string]types.FunctionDoc{
-				"list_networks": {
-					Signature:   "dora.list_networks() -> list[dict]",
-					Description: "List networks with Dora explorers. Uses networks discovered from cartographoor.",
-					Returns:     "List of dicts with 'name', 'dora_url' keys",
-				},
-				"get_base_url": {
-					Signature:   "dora.get_base_url(network: str) -> str",
-					Description: "Get the Dora base URL for a network",
-					Parameters: map[string]string{
-						"network": "Network name (e.g., 'holesky', 'mainnet')",
-					},
-					Returns: "Dora base URL string",
-				},
-				"get_network_overview": {
-					Signature:   "dora.get_network_overview(network: str) -> dict",
-					Description: "Get network overview including current epoch, slot, and validator counts",
-					Parameters: map[string]string{
-						"network": "Network name",
-					},
-					Returns: "Dict with current_epoch, current_slot, active_validator_count, etc.",
-				},
-				"get_validator": {
-					Signature:   "dora.get_validator(network: str, index_or_pubkey: str) -> dict",
-					Description: "Get validator details by index or public key",
-					Parameters: map[string]string{
-						"network":         "Network name",
-						"index_or_pubkey": "Validator index (e.g., '12345') or public key",
-					},
-					Returns: "Dict with status, balance, activation_epoch, etc.",
-				},
-				"get_validators": {
-					Signature:   "dora.get_validators(network: str, status: str = None, limit: int = 100) -> list",
-					Description: "Get list of validators with optional status filter",
-					Parameters: map[string]string{
-						"network": "Network name",
-						"status":  "Filter by status: 'active', 'pending', 'exited', etc.",
-						"limit":   "Maximum number of validators to return",
-					},
-					Returns: "List of validator dicts",
-				},
-				"get_slot": {
-					Signature:   "dora.get_slot(network: str, slot_or_hash: str) -> dict",
-					Description: "Get slot details by slot number or block hash",
-					Parameters: map[string]string{
-						"network":      "Network name",
-						"slot_or_hash": "Slot number or block hash",
-					},
-					Returns: "Dict with slot, proposer, status, etc.",
-				},
-				"get_epoch": {
-					Signature:   "dora.get_epoch(network: str, epoch: int) -> dict",
-					Description: "Get epoch summary",
-					Parameters: map[string]string{
-						"network": "Network name",
-						"epoch":   "Epoch number",
-					},
-					Returns: "Dict with epoch stats and finalization status",
-				},
-				"link_validator": {
-					Signature:   "dora.link_validator(network: str, index_or_pubkey: str) -> str",
-					Description: "Generate a Dora deep link to a validator",
-					Parameters: map[string]string{
-						"network":         "Network name",
-						"index_or_pubkey": "Validator index or public key",
-					},
-					Returns: "URL string to view validator in Dora",
-				},
-				"link_slot": {
-					Signature:   "dora.link_slot(network: str, slot_or_hash: str) -> str",
-					Description: "Generate a Dora deep link to a slot/block",
-					Parameters: map[string]string{
-						"network":      "Network name",
-						"slot_or_hash": "Slot number or block hash",
-					},
-					Returns: "URL string to view slot in Dora",
-				},
-				"link_epoch": {
-					Signature:   "dora.link_epoch(network: str, epoch: int) -> str",
-					Description: "Generate a Dora deep link to an epoch",
-					Parameters: map[string]string{
-						"network": "Network name",
-						"epoch":   "Epoch number",
-					},
-					Returns: "URL string to view epoch in Dora",
-				},
-				"link_address": {
-					Signature:   "dora.link_address(network: str, address: str) -> str",
-					Description: "Generate a Dora deep link to an execution layer address",
-					Parameters: map[string]string{
-						"network": "Network name",
-						"address": "Ethereum address (0x...)",
-					},
-					Returns: "URL string to view address in Dora",
-				},
-				"link_block": {
-					Signature:   "dora.link_block(network: str, number_or_hash: str) -> str",
-					Description: "Generate a Dora deep link to an execution layer block",
-					Parameters: map[string]string{
-						"network":        "Network name",
-						"number_or_hash": "Block number or hash",
-					},
-					Returns: "URL string to view block in Dora",
-				},
+				"list_networks":        {Signature: "list_networks() -> list[dict]", Description: "List networks with Dora explorers"},
+				"get_base_url":         {Signature: "get_base_url(network) -> str", Description: "Get Dora base URL for a network"},
+				"get_network_overview": {Signature: "get_network_overview(network) -> dict", Description: "Get epoch, slot, validator counts"},
+				"get_validator":        {Signature: "get_validator(network, index_or_pubkey) -> dict", Description: "Get validator by index or pubkey"},
+				"get_validators":       {Signature: "get_validators(network, status=None, limit=100) -> list", Description: "List validators with optional filter"},
+				"get_slot":             {Signature: "get_slot(network, slot_or_hash) -> dict", Description: "Get slot by number or hash"},
+				"get_epoch":            {Signature: "get_epoch(network, epoch) -> dict", Description: "Get epoch summary"},
+				"link_validator":       {Signature: "link_validator(network, index_or_pubkey) -> str", Description: "Deep link to validator"},
+				"link_slot":            {Signature: "link_slot(network, slot_or_hash) -> str", Description: "Deep link to slot"},
+				"link_epoch":           {Signature: "link_epoch(network, epoch) -> str", Description: "Deep link to epoch"},
+				"link_address":         {Signature: "link_address(network, address) -> str", Description: "Deep link to address"},
+				"link_block":           {Signature: "link_block(network, number_or_hash) -> str", Description: "Deep link to block"},
 			},
 		},
 	}
@@ -268,22 +177,8 @@ func (p *Plugin) SetLogger(log logrus.FieldLogger) {
 	p.log = log.WithField("plugin", "dora")
 }
 
-// RegisterResources registers Dora-specific MCP resources.
-func (p *Plugin) RegisterResources(log logrus.FieldLogger, reg plugin.ResourceRegistry) error {
-	if !p.cfg.IsEnabled() {
-		return nil
-	}
-
-	p.log = log.WithField("plugin", "dora")
-
-	if p.cartographoorClient == nil {
-		p.log.Warn("Cartographoor client not set, skipping Dora resources registration")
-
-		return nil
-	}
-
-	RegisterDoraResources(p.log, reg, p.cartographoorClient)
-
+// RegisterResources is a no-op since Dora uses networks:// resources.
+func (p *Plugin) RegisterResources(_ logrus.FieldLogger, _ plugin.ResourceRegistry) error {
 	return nil
 }
 
