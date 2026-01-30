@@ -32,44 +32,24 @@ func NewDatasourceProvider(pluginReg *plugin.Registry, proxyClient proxy.Client)
 	}
 }
 
-// DatasourceInfo returns datasource info, preferring proxy data if plugins are empty.
+// DatasourceInfo returns datasource info from the proxy.
+// If the proxy is unavailable, it falls back to plugin-derived info.
 func (p *DatasourceProvider) DatasourceInfo() []types.DatasourceInfo {
-	// First try plugins.
-	infos := p.pluginReg.DatasourceInfo()
-	if len(infos) > 0 {
-		return infos
+	if p.proxyClient != nil {
+		var result []types.DatasourceInfo
+
+		result = append(result, p.proxyClient.ClickHouseDatasourceInfo()...)
+		result = append(result, p.proxyClient.PrometheusDatasourceInfo()...)
+		result = append(result, p.proxyClient.LokiDatasourceInfo()...)
+
+		return result
 	}
 
-	// Fall back to proxy client if available.
-	if p.proxyClient == nil {
+	if p.pluginReg == nil {
 		return nil
 	}
 
-	// Build datasource info from proxy client.
-	var result []types.DatasourceInfo
-
-	for _, name := range p.proxyClient.ClickHouseDatasources() {
-		result = append(result, types.DatasourceInfo{
-			Type: "clickhouse",
-			Name: name,
-		})
-	}
-
-	for _, name := range p.proxyClient.PrometheusDatasources() {
-		result = append(result, types.DatasourceInfo{
-			Type: "prometheus",
-			Name: name,
-		})
-	}
-
-	for _, name := range p.proxyClient.LokiDatasources() {
-		result = append(result, types.DatasourceInfo{
-			Type: "loki",
-			Name: name,
-		})
-	}
-
-	return result
+	return p.pluginReg.DatasourceInfo()
 }
 
 // RegisterDatasourcesResources registers the datasources:// resources

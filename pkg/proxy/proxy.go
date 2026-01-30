@@ -2,7 +2,11 @@
 // The proxy holds datasource credentials and proxies requests from sandbox containers.
 package proxy
 
-import "context"
+import (
+	"context"
+
+	"github.com/ethpandaops/mcp/pkg/types"
+)
 
 // Service is the credential proxy service interface.
 // This is implemented by both Client (for connecting to a proxy)
@@ -27,12 +31,18 @@ type Service interface {
 
 	// ClickHouseDatasources returns the list of ClickHouse datasource names.
 	ClickHouseDatasources() []string
+	// ClickHouseDatasourceInfo returns detailed ClickHouse datasource info.
+	ClickHouseDatasourceInfo() []types.DatasourceInfo
 
 	// PrometheusDatasources returns the list of Prometheus datasource names.
 	PrometheusDatasources() []string
+	// PrometheusDatasourceInfo returns detailed Prometheus datasource info.
+	PrometheusDatasourceInfo() []types.DatasourceInfo
 
 	// LokiDatasources returns the list of Loki datasource names.
 	LokiDatasources() []string
+	// LokiDatasourceInfo returns detailed Loki datasource info.
+	LokiDatasourceInfo() []types.DatasourceInfo
 
 	// S3Bucket returns the configured S3 bucket name.
 	S3Bucket() string

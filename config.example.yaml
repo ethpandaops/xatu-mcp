@@ -9,86 +9,27 @@ server:
 
 # Plugin configuration
 # Each key maps to a compiled-in plugin. Plugins without config are skipped.
+# Datasource availability is discovered from the credential proxy; plugin config is for
+# schema discovery, documentation, and optional overrides.
 plugins:
   # ClickHouse configuration
-  # Direct connections to ClickHouse clusters for data queries (HTTP/HTTPS only).
+  # Schema discovery runs THROUGH the credential proxy (no direct DB creds here).
+  # Datasource names must match proxy-config.yaml.
   clickhouse:
-    clusters:
-      # Main Xatu cluster - raw event data
-      - name: "xatu"
-        description: |
-          Main Xatu ClickHouse cluster with raw Ethereum event data.
-          Contains beacon chain events (blocks, attestations, blob sidecars, etc.)
-          and execution layer data across mainnet, sepolia, hoodi networks.
-          IMPORTANT: Always filter by the table's partition key AND meta_network_name.
-          Use clickhouse://tables/{table} to discover available tables and columns.
-        host: "${CLICKHOUSE_XATU_HOST}"  # e.g., clickhouse.example.com or clickhouse.example.com:8443
-        database: "${CLICKHOUSE_XATU_DATABASE}"
-        username: "${CLICKHOUSE_XATU_USERNAME}"
-        password: "${CLICKHOUSE_XATU_PASSWORD}"
-        secure: true  # Use TLS (default: true)
-        skip_verify: false  # Skip TLS cert verification (default: false)
-        timeout: 120  # Query timeout in seconds
-
-      # Pre-aggregated CBT data
-      - name: "xatu-cbt"
-        description: |
-          Xatu CBT (ClickHouse Build Tool) cluster with pre-aggregated data built on top of the raw event data in the xatu cluster.
-          Contains block timing analysis, attestation accuracy by entity, and
-          validator performance metrics. Faster queries than raw data.
-          IMPORTANT: Always filter by the table's partition key.
-          Use clickhouse://tables/{table} to discover available tables.
-        host: "${CLICKHOUSE_CBT_HOST}"
-        database: "${CLICKHOUSE_CBT_DATABASE}"
-        username: "${CLICKHOUSE_CBT_USERNAME}"
-        password: "${CLICKHOUSE_CBT_PASSWORD}"
-        secure: true
-        timeout: 120
-
-      # Experimental cluster for devnet data
-      - name: "xatu-experimental"
-        description: |
-          Experimental Xatu ClickHouse cluster with devnet Ethereum event data.
-          Contains beacon chain events (blocks, attestations, blob sidecars, etc.)
-          and execution layer data for devnet networks only.
-          IMPORTANT: Always filter by the table's partition key AND meta_network_name.
-          Use clickhouse://tables/{table} to discover available tables and columns.
-        host: "${CLICKHOUSE_EXPERIMENTAL_HOST}"
-        database: "${CLICKHOUSE_EXPERIMENTAL_DATABASE}"
-        username: "${CLICKHOUSE_EXPERIMENTAL_USERNAME}"
-        password: "${CLICKHOUSE_EXPERIMENTAL_PASSWORD}"
-        secure: true
-        timeout: 120
-
     # ClickHouse schema discovery configuration
-    # Discovers table schemas from configured ClickHouse clusters.
+    # Discovers table schemas from proxy-exposed datasources.
     schema_discovery:
-      # enabled: true  # Defaults to true if datasources are configured
+      # enabled: true  # Optional; defaults to enabled when proxy has datasources
       refresh_interval: 15m  # How often to refresh schema cache
 
-      # Datasources to discover schemas from
+      # Datasources to discover schemas from.
+      # If empty or omitted, ALL proxy ClickHouse datasources are used.
       datasources:
-        - name: "xatu"      # References clusters[].name above
-          cluster: "xatu"   # Logical cluster name for resources
+        - name: "xatu"      # Proxy datasource name
+          cluster: "xatu"   # Logical cluster name for resources (defaults to name)
         - name: "xatu-cbt"
-          cluster: "xatu-cbt"
         - name: "xatu-experimental"
           cluster: "xatu-experimental"
-
-  # Prometheus configuration
-  # Direct connections to Prometheus/VictoriaMetrics instances.
-  prometheus:
-    instances:
-      - name: "ethpandaops"
-        description: |
-          Prometheus/VictoriaMetrics for infrastructure metrics.
-          Contains beacon node metrics, validator metrics, and system health data.
-          Common labels: ingress_user, container, pod, namespace, instance.
-        url: "${PROMETHEUS_URL}"  # e.g., https://prometheus.example.com
-        username: "${PROMETHEUS_USERNAME}"  # Optional (for basic auth)
-        password: "${PROMETHEUS_PASSWORD}"  # Optional
-        skip_verify: false  # Skip TLS cert verification (default: false)
-        timeout: 60  # Query timeout in seconds
 
   # Dora configuration
   # Dora beacon chain explorer is enabled by default with no configuration needed.
@@ -96,20 +37,6 @@ plugins:
   # dora:
   #   enabled: true  # Set to false to disable Dora integration
 
-  # Loki configuration
-  # Direct connections to Loki instances for log queries.
-  loki:
-    instances:
-      - name: "ethpandaops"
-        description: |
-          Loki cluster for beacon node and validator logs.
-          Must filter by label (e.g., ingress_user, container, pod, namespace).
-          Common queries: error patterns, consensus issues, peer connectivity.
-        url: "${LOKI_URL}"  # e.g., https://loki.example.com
-        username: "${LOKI_USERNAME}"  # Optional (for basic auth)
-        password: "${LOKI_PASSWORD}"  # Optional
-        skip_verify: false  # Skip TLS cert verification (default: false)
-        timeout: 60  # Query timeout in seconds
 
 # Sandbox configuration
 sandbox:

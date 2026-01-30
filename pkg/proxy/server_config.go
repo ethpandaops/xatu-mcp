@@ -68,31 +68,34 @@ type AuthConfig struct {
 
 // ClickHouseClusterConfig holds ClickHouse cluster configuration.
 type ClickHouseClusterConfig struct {
-	Name       string `yaml:"name"`
-	Host       string `yaml:"host"`
-	Port       int    `yaml:"port"`
-	Database   string `yaml:"database,omitempty"`
-	Username   string `yaml:"username"`
-	Password   string `yaml:"password"`
-	Secure     bool   `yaml:"secure"`
-	SkipVerify bool   `yaml:"skip_verify,omitempty"`
-	Timeout    int    `yaml:"timeout,omitempty"`
+	Name        string `yaml:"name"`
+	Description string `yaml:"description,omitempty"`
+	Host        string `yaml:"host"`
+	Port        int    `yaml:"port"`
+	Database    string `yaml:"database,omitempty"`
+	Username    string `yaml:"username"`
+	Password    string `yaml:"password"`
+	Secure      bool   `yaml:"secure"`
+	SkipVerify  bool   `yaml:"skip_verify,omitempty"`
+	Timeout     int    `yaml:"timeout,omitempty"`
 }
 
 // PrometheusInstanceConfig holds Prometheus instance configuration.
 type PrometheusInstanceConfig struct {
-	Name     string `yaml:"name"`
-	URL      string `yaml:"url"`
-	Username string `yaml:"username,omitempty"`
-	Password string `yaml:"password,omitempty"`
+	Name        string `yaml:"name"`
+	Description string `yaml:"description,omitempty"`
+	URL         string `yaml:"url"`
+	Username    string `yaml:"username,omitempty"`
+	Password    string `yaml:"password,omitempty"`
 }
 
 // LokiInstanceConfig holds Loki instance configuration.
 type LokiInstanceConfig struct {
-	Name     string `yaml:"name"`
-	URL      string `yaml:"url"`
-	Username string `yaml:"username,omitempty"`
-	Password string `yaml:"password,omitempty"`
+	Name        string `yaml:"name"`
+	Description string `yaml:"description,omitempty"`
+	URL         string `yaml:"url"`
+	Username    string `yaml:"username,omitempty"`
+	Password    string `yaml:"password,omitempty"`
 }
 
 // S3Config holds S3 storage configuration.
@@ -301,8 +304,8 @@ func (c *ServerConfig) ToHandlerConfigs() ([]handlers.ClickHouseConfig, []handle
 	return chConfigs, promConfigs, lokiConfigs, s3Config
 }
 
-// envVarPattern matches ${VAR_NAME} patterns for environment variable substitution.
-var envVarPattern = regexp.MustCompile(`\$\{([^}]+)\}`)
+// envVarWithDefaultPattern matches ${VAR_NAME:-default} patterns.
+var envVarWithDefaultPattern = regexp.MustCompile(`\$\{([^}:]+)(?::-([^}]*))?\}`)
 
 // LoadServerConfig loads a proxy server config from a YAML file.
 func LoadServerConfig(path string) (*ServerConfig, error) {
@@ -338,9 +341,10 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	return &cfg, nil
 }
 
-// substituteEnvVars replaces ${VAR_NAME} patterns with environment variable values.
+// substituteEnvVars replaces ${VAR_NAME} and ${VAR_NAME:-default} patterns with environment variable values.
+// Lines that are comments (starting with #) are skipped.
+// Missing environment variables without defaults are replaced with empty strings (lenient mode).
 func substituteEnvVars(content string) (string, error) {
-	var missingVars []string
 	lines := strings.Split(content, "\n")
 
 	for i, line := range lines {
@@ -350,22 +354,21 @@ func substituteEnvVars(content string) (string, error) {
 			continue
 		}
 
-		lines[i] = envVarPattern.ReplaceAllStringFunc(line, func(match string) string {
-			varName := envVarPattern.FindStringSubmatch(match)[1]
+		lines[i] = envVarWithDefaultPattern.ReplaceAllStringFunc(line, func(match string) string {
+			parts := envVarWithDefaultPattern.FindStringSubmatch(match)
+			varName := parts[1]
+			defaultVal := ""
+			if len(parts) > 2 {
+				defaultVal = parts[2]
+			}
+
 			value := os.Getenv(varName)
-
 			if value == "" {
-				missingVars = append(missingVars, varName)
-
-				return match
+				return defaultVal // Use default or empty string
 			}
 
 			return value
 		})
-	}
-
-	if len(missingVars) > 0 {
-		return "", fmt.Errorf("missing environment variables: %v", missingVars)
 	}
 
 	return strings.Join(lines, "\n"), nil

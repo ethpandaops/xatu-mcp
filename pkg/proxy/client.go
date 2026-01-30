@@ -13,6 +13,7 @@ import (
 
 	"github.com/ethpandaops/mcp/pkg/auth/client"
 	"github.com/ethpandaops/mcp/pkg/auth/store"
+	"github.com/ethpandaops/mcp/pkg/types"
 )
 
 // Client connects to a proxy server and provides:
@@ -40,12 +41,18 @@ type Client interface {
 
 	// ClickHouseDatasources returns the discovered ClickHouse datasource names.
 	ClickHouseDatasources() []string
+	// ClickHouseDatasourceInfo returns detailed ClickHouse datasource info.
+	ClickHouseDatasourceInfo() []types.DatasourceInfo
 
 	// PrometheusDatasources returns the discovered Prometheus datasource names.
 	PrometheusDatasources() []string
+	// PrometheusDatasourceInfo returns detailed Prometheus datasource info.
+	PrometheusDatasourceInfo() []types.DatasourceInfo
 
 	// LokiDatasources returns the discovered Loki datasource names.
 	LokiDatasources() []string
+	// LokiDatasourceInfo returns detailed Loki datasource info.
+	LokiDatasourceInfo() []types.DatasourceInfo
 
 	// S3Bucket returns the discovered S3 bucket name.
 	S3Bucket() string
@@ -203,12 +210,81 @@ func (c *proxyClient) RevokeToken(_ string) {
 	// No-op: JWTs are managed by the OIDC provider, not revoked per-execution
 }
 
+func namesFromInfo(infos []types.DatasourceInfo) []string {
+	if len(infos) == 0 {
+		return nil
+	}
+
+	names := make([]string, 0, len(infos))
+	for _, info := range infos {
+		if info.Name != "" {
+			names = append(names, info.Name)
+		}
+	}
+
+	return names
+}
+
+func namesToInfo(kind string, names []string) []types.DatasourceInfo {
+	if len(names) == 0 {
+		return nil
+	}
+
+	infos := make([]types.DatasourceInfo, 0, len(names))
+	for _, name := range names {
+		if name == "" {
+			continue
+		}
+		infos = append(infos, types.DatasourceInfo{
+			Type: kind,
+			Name: name,
+		})
+	}
+
+	return infos
+}
+
+func normalizeInfo(kind string, infos []types.DatasourceInfo) []types.DatasourceInfo {
+	if len(infos) == 0 {
+		return nil
+	}
+
+	result := make([]types.DatasourceInfo, 0, len(infos))
+	for _, info := range infos {
+		if info.Name == "" {
+			continue
+		}
+		if info.Type == "" {
+			info.Type = kind
+		}
+		result = append(result, info)
+	}
+
+	return result
+}
+
 // ClickHouseDatasources returns the discovered ClickHouse datasource names.
 func (c *proxyClient) ClickHouseDatasources() []string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	return c.datasources.ClickHouse
+	if len(c.datasources.ClickHouse) > 0 {
+		return append([]string(nil), c.datasources.ClickHouse...)
+	}
+
+	return namesFromInfo(c.datasources.ClickHouseInfo)
+}
+
+// ClickHouseDatasourceInfo returns detailed ClickHouse datasource info.
+func (c *proxyClient) ClickHouseDatasourceInfo() []types.DatasourceInfo {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if len(c.datasources.ClickHouseInfo) > 0 {
+		return normalizeInfo("clickhouse", c.datasources.ClickHouseInfo)
+	}
+
+	return namesToInfo("clickhouse", c.datasources.ClickHouse)
 }
 
 // PrometheusDatasources returns the discovered Prometheus datasource names.
@@ -216,7 +292,23 @@ func (c *proxyClient) PrometheusDatasources() []string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	return c.datasources.Prometheus
+	if len(c.datasources.Prometheus) > 0 {
+		return append([]string(nil), c.datasources.Prometheus...)
+	}
+
+	return namesFromInfo(c.datasources.PrometheusInfo)
+}
+
+// PrometheusDatasourceInfo returns detailed Prometheus datasource info.
+func (c *proxyClient) PrometheusDatasourceInfo() []types.DatasourceInfo {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if len(c.datasources.PrometheusInfo) > 0 {
+		return normalizeInfo("prometheus", c.datasources.PrometheusInfo)
+	}
+
+	return namesToInfo("prometheus", c.datasources.Prometheus)
 }
 
 // LokiDatasources returns the discovered Loki datasource names.
@@ -224,7 +316,23 @@ func (c *proxyClient) LokiDatasources() []string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	return c.datasources.Loki
+	if len(c.datasources.Loki) > 0 {
+		return append([]string(nil), c.datasources.Loki...)
+	}
+
+	return namesFromInfo(c.datasources.LokiInfo)
+}
+
+// LokiDatasourceInfo returns detailed Loki datasource info.
+func (c *proxyClient) LokiDatasourceInfo() []types.DatasourceInfo {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if len(c.datasources.LokiInfo) > 0 {
+		return normalizeInfo("loki", c.datasources.LokiInfo)
+	}
+
+	return namesToInfo("loki", c.datasources.Loki)
 }
 
 // S3Bucket returns the discovered S3 bucket name.
@@ -273,10 +381,25 @@ func (c *proxyClient) Discover(ctx context.Context) error {
 	c.datasources = &datasources
 	c.mu.Unlock()
 
+	clickhouseCount := len(datasources.ClickHouse)
+	if clickhouseCount == 0 {
+		clickhouseCount = len(datasources.ClickHouseInfo)
+	}
+
+	prometheusCount := len(datasources.Prometheus)
+	if prometheusCount == 0 {
+		prometheusCount = len(datasources.PrometheusInfo)
+	}
+
+	lokiCount := len(datasources.Loki)
+	if lokiCount == 0 {
+		lokiCount = len(datasources.LokiInfo)
+	}
+
 	c.log.WithFields(logrus.Fields{
-		"clickhouse": len(datasources.ClickHouse),
-		"prometheus": len(datasources.Prometheus),
-		"loki":       len(datasources.Loki),
+		"clickhouse": clickhouseCount,
+		"prometheus": prometheusCount,
+		"loki":       lokiCount,
 		"s3_bucket":  datasources.S3Bucket,
 	}).Debug("Discovered datasources from proxy")
 

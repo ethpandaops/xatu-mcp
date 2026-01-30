@@ -16,6 +16,7 @@ import (
 	"github.com/ethpandaops/mcp/pkg/plugin"
 	"github.com/ethpandaops/mcp/pkg/proxy"
 	"github.com/ethpandaops/mcp/pkg/sandbox"
+	"github.com/ethpandaops/mcp/pkg/types"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -336,41 +337,88 @@ func buildSandboxEnv(
 		env["ETHPANDAOPS_S3_PUBLIC_URL_PREFIX"] = prefix
 	}
 
-	// If plugins didn't provide datasource info, get it from proxy.
-	// This happens when plugins aren't initialized (e.g., no local credentials).
-	if _, ok := env["ETHPANDAOPS_CLICKHOUSE_DATASOURCES"]; !ok {
-		if ds := proxySvc.ClickHouseDatasources(); len(ds) > 0 {
-			env["ETHPANDAOPS_CLICKHOUSE_DATASOURCES"] = buildDatasourceJSON(ds)
-		}
+	// Datasources are proxy-authoritative; override any plugin-provided lists.
+	delete(env, "ETHPANDAOPS_CLICKHOUSE_DATASOURCES")
+	delete(env, "ETHPANDAOPS_PROMETHEUS_DATASOURCES")
+	delete(env, "ETHPANDAOPS_LOKI_DATASOURCES")
+
+	if ds := proxySvc.ClickHouseDatasourceInfo(); len(ds) > 0 {
+		env["ETHPANDAOPS_CLICKHOUSE_DATASOURCES"] = buildClickhouseDatasourceJSON(ds)
 	}
 
-	if _, ok := env["ETHPANDAOPS_PROMETHEUS_DATASOURCES"]; !ok {
-		if ds := proxySvc.PrometheusDatasources(); len(ds) > 0 {
-			env["ETHPANDAOPS_PROMETHEUS_DATASOURCES"] = buildDatasourceJSON(ds)
-		}
+	if ds := proxySvc.PrometheusDatasourceInfo(); len(ds) > 0 {
+		env["ETHPANDAOPS_PROMETHEUS_DATASOURCES"] = buildPrometheusDatasourceJSON(ds)
 	}
 
-	if _, ok := env["ETHPANDAOPS_LOKI_DATASOURCES"]; !ok {
-		if ds := proxySvc.LokiDatasources(); len(ds) > 0 {
-			env["ETHPANDAOPS_LOKI_DATASOURCES"] = buildDatasourceJSON(ds)
-		}
+	if ds := proxySvc.LokiDatasourceInfo(); len(ds) > 0 {
+		env["ETHPANDAOPS_LOKI_DATASOURCES"] = buildLokiDatasourceJSON(ds)
 	}
 
 	return env, nil
 }
 
-// buildDatasourceJSON creates a JSON array of datasource info objects.
-func buildDatasourceJSON(names []string) string {
+// buildClickhouseDatasourceJSON creates a JSON array of ClickHouse datasource info objects.
+func buildClickhouseDatasourceJSON(infos []types.DatasourceInfo) string {
 	type dsInfo struct {
-		Name string `json:"name"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Database    string `json:"database"`
 	}
 
-	infos := make([]dsInfo, len(names))
-	for i, name := range names {
-		infos[i] = dsInfo{Name: name}
+	result := make([]dsInfo, 0, len(infos))
+	for _, info := range infos {
+		result = append(result, dsInfo{
+			Name:        info.Name,
+			Description: info.Description,
+			Database:    info.Metadata["database"],
+		})
 	}
 
-	data, err := json.Marshal(infos)
+	return marshalDatasourceJSON(result)
+}
+
+// buildPrometheusDatasourceJSON creates a JSON array of Prometheus datasource info objects.
+func buildPrometheusDatasourceJSON(infos []types.DatasourceInfo) string {
+	type dsInfo struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		URL         string `json:"url"`
+	}
+
+	result := make([]dsInfo, 0, len(infos))
+	for _, info := range infos {
+		result = append(result, dsInfo{
+			Name:        info.Name,
+			Description: info.Description,
+			URL:         info.Metadata["url"],
+		})
+	}
+
+	return marshalDatasourceJSON(result)
+}
+
+// buildLokiDatasourceJSON creates a JSON array of Loki datasource info objects.
+func buildLokiDatasourceJSON(infos []types.DatasourceInfo) string {
+	type dsInfo struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		URL         string `json:"url"`
+	}
+
+	result := make([]dsInfo, 0, len(infos))
+	for _, info := range infos {
+		result = append(result, dsInfo{
+			Name:        info.Name,
+			Description: info.Description,
+			URL:         info.Metadata["url"],
+		})
+	}
+
+	return marshalDatasourceJSON(result)
+}
+
+func marshalDatasourceJSON(value any) string {
+	data, err := json.Marshal(value)
 	if err != nil {
 		return "[]"
 	}

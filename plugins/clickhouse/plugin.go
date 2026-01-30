@@ -12,6 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/ethpandaops/mcp/pkg/plugin"
+	"github.com/ethpandaops/mcp/pkg/proxy"
 	"github.com/ethpandaops/mcp/pkg/proxy/handlers"
 	"github.com/ethpandaops/mcp/pkg/types"
 )
@@ -23,6 +24,7 @@ type Plugin struct {
 	cfg          Config
 	log          logrus.FieldLogger
 	schemaClient ClickHouseSchemaClient
+	proxySvc     proxy.Service
 }
 
 func New() *Plugin {
@@ -31,41 +33,34 @@ func New() *Plugin {
 
 func (p *Plugin) Name() string { return "clickhouse" }
 
+// SetProxyClient injects the proxy service for schema discovery.
+func (p *Plugin) SetProxyClient(client any) {
+	if svc, ok := client.(proxy.Service); ok {
+		p.proxySvc = svc
+	}
+}
+
 func (p *Plugin) Init(rawConfig []byte) error {
 	if err := yaml.Unmarshal(rawConfig, &p.cfg); err != nil {
 		return err
 	}
 
-	// Filter out clusters with empty required fields (e.g., missing env vars).
+	// Drop unnamed clusters; remaining fields are optional when proxy is authoritative.
 	validClusters := make([]ClusterConfig, 0, len(p.cfg.Clusters))
-
 	for _, c := range p.cfg.Clusters {
-		if c.Name != "" && c.Host != "" && c.Database != "" && c.Username != "" && c.Password != "" {
+		if c.Name != "" {
 			validClusters = append(validClusters, c)
 		}
 	}
-
 	p.cfg.Clusters = validClusters
 
-	// If no valid clusters remain, signal that this plugin should be skipped.
-	if len(p.cfg.Clusters) == 0 {
-		return plugin.ErrNoValidConfig
-	}
-
-	// Filter schema discovery datasources to only reference valid clusters.
-	clusterNames := make(map[string]struct{}, len(p.cfg.Clusters))
-	for _, c := range p.cfg.Clusters {
-		clusterNames[c.Name] = struct{}{}
-	}
-
+	// Drop schema discovery entries without a datasource name.
 	validDatasources := make([]SchemaDiscoveryDatasource, 0, len(p.cfg.SchemaDiscovery.Datasources))
-
 	for _, ds := range p.cfg.SchemaDiscovery.Datasources {
-		if _, exists := clusterNames[ds.Name]; exists && ds.Cluster != "" {
+		if ds.Name != "" {
 			validDatasources = append(validDatasources, ds)
 		}
 	}
-
 	p.cfg.SchemaDiscovery.Datasources = validDatasources
 
 	return nil
@@ -92,29 +87,11 @@ func (p *Plugin) Validate() error {
 			return fmt.Errorf("clusters[%d].name %q is duplicated", i, ch.Name)
 		}
 		names[ch.Name] = struct{}{}
-		if ch.Host == "" {
-			return fmt.Errorf("clusters[%d].host is required", i)
-		}
-		if ch.Database == "" {
-			return fmt.Errorf("clusters[%d].database is required", i)
-		}
-		if ch.Username == "" {
-			return fmt.Errorf("clusters[%d].username is required", i)
-		}
-		if ch.Password == "" {
-			return fmt.Errorf("clusters[%d].password is required", i)
-		}
 	}
-	// Validate schema discovery datasources reference valid clusters
+	// Validate schema discovery entries.
 	for i, ds := range p.cfg.SchemaDiscovery.Datasources {
 		if ds.Name == "" {
 			return fmt.Errorf("schema_discovery.datasources[%d].name is required", i)
-		}
-		if ds.Cluster == "" {
-			return fmt.Errorf("schema_discovery.datasources[%d].cluster is required", i)
-		}
-		if _, exists := names[ds.Name]; !exists {
-			return fmt.Errorf("schema_discovery.datasources[%d].name %q does not reference a configured cluster", i, ds.Name)
 		}
 	}
 	return nil
@@ -302,16 +279,46 @@ func (p *Plugin) RegisterResources(log logrus.FieldLogger, reg plugin.ResourceRe
 }
 
 func (p *Plugin) Start(ctx context.Context) error {
-	if !p.cfg.SchemaDiscovery.IsEnabled() {
-		if p.log != nil {
-			p.log.Debug("Schema discovery disabled, skipping")
-		}
-		return nil
-	}
-
 	// Create the schema client
 	if p.log == nil {
 		p.log = logrus.WithField("plugin", "clickhouse")
+	}
+
+	if p.cfg.SchemaDiscovery.Enabled != nil && !*p.cfg.SchemaDiscovery.Enabled {
+		p.log.Debug("Schema discovery disabled, skipping")
+		return nil
+	}
+
+	if p.proxySvc == nil {
+		return fmt.Errorf("proxy service is required for ClickHouse schema discovery")
+	}
+
+	datasources := make([]SchemaDiscoveryDatasource, 0, len(p.cfg.SchemaDiscovery.Datasources))
+	for _, ds := range p.cfg.SchemaDiscovery.Datasources {
+		if ds.Name == "" {
+			continue
+		}
+		if ds.Cluster == "" {
+			ds.Cluster = ds.Name
+		}
+		datasources = append(datasources, ds)
+	}
+
+	if len(datasources) == 0 {
+		for _, name := range p.proxySvc.ClickHouseDatasources() {
+			if name == "" {
+				continue
+			}
+			datasources = append(datasources, SchemaDiscoveryDatasource{
+				Name:    name,
+				Cluster: name,
+			})
+		}
+	}
+
+	if len(datasources) == 0 {
+		p.log.Debug("No ClickHouse datasources available for schema discovery, skipping")
+		return nil
 	}
 
 	p.schemaClient = NewClickHouseSchemaClient(
@@ -319,9 +326,9 @@ func (p *Plugin) Start(ctx context.Context) error {
 		ClickHouseSchemaConfig{
 			RefreshInterval: p.cfg.SchemaDiscovery.RefreshInterval,
 			QueryTimeout:    DefaultSchemaQueryTimeout,
-			Datasources:     p.cfg.SchemaDiscovery.Datasources,
+			Datasources:     datasources,
 		},
-		p.cfg.Clusters,
+		p.proxySvc,
 	)
 
 	return p.schemaClient.Start(ctx)

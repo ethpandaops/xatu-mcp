@@ -49,6 +49,7 @@ auth:
 # ClickHouse clusters
 clickhouse:
   - name: xatu
+    description: "Main Xatu ClickHouse cluster"
     host: "${CLICKHOUSE_HOST}"
     port: 8443
     database: default
@@ -61,6 +62,7 @@ clickhouse:
 # Prometheus instances
 prometheus:
   - name: primary
+    description: "Primary Prometheus instance"
     url: "${PROMETHEUS_URL}"
     username: "${PROMETHEUS_USERNAME}"
     password: "${PROMETHEUS_PASSWORD}"
@@ -68,6 +70,7 @@ prometheus:
 # Loki instances
 loki:
   - name: primary
+    description: "Primary Loki instance"
     url: "${LOKI_URL}"
     username: "${LOKI_USERNAME}"
     password: "${LOKI_PASSWORD}"

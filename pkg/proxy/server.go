@@ -12,6 +12,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/ethpandaops/mcp/pkg/proxy/handlers"
+	"github.com/ethpandaops/mcp/pkg/types"
 )
 
 // Server is the credential proxy server interface.
@@ -201,11 +202,14 @@ func (s *server) buildMiddlewareChain() func(http.Handler) http.Handler {
 // DatasourcesResponse is the response from the /datasources endpoint.
 // This is used by the MCP server client to discover available datasources.
 type DatasourcesResponse struct {
-	ClickHouse        []string `json:"clickhouse"`
-	Prometheus        []string `json:"prometheus"`
-	Loki              []string `json:"loki"`
-	S3Bucket          string   `json:"s3_bucket,omitempty"`
-	S3PublicURLPrefix string   `json:"s3_public_url_prefix,omitempty"`
+	ClickHouse        []string               `json:"clickhouse,omitempty"`
+	Prometheus        []string               `json:"prometheus,omitempty"`
+	Loki              []string               `json:"loki,omitempty"`
+	ClickHouseInfo    []types.DatasourceInfo `json:"clickhouse_info,omitempty"`
+	PrometheusInfo    []types.DatasourceInfo `json:"prometheus_info,omitempty"`
+	LokiInfo          []types.DatasourceInfo `json:"loki_info,omitempty"`
+	S3Bucket          string                 `json:"s3_bucket,omitempty"`
+	S3PublicURLPrefix string                 `json:"s3_public_url_prefix,omitempty"`
 }
 
 // handleDatasources returns the list of available datasources.
@@ -214,6 +218,9 @@ func (s *server) handleDatasources(w http.ResponseWriter, _ *http.Request) {
 		ClickHouse:        s.ClickHouseDatasources(),
 		Prometheus:        s.PrometheusDatasources(),
 		Loki:              s.LokiDatasources(),
+		ClickHouseInfo:    s.ClickHouseDatasourceInfo(),
+		PrometheusInfo:    s.PrometheusDatasourceInfo(),
+		LokiInfo:          s.LokiDatasourceInfo(),
 		S3Bucket:          s.S3Bucket(),
 		S3PublicURLPrefix: s.S3PublicURLPrefix(),
 	}
@@ -320,6 +327,30 @@ func (s *server) ClickHouseDatasources() []string {
 	return s.clickhouseHandler.Clusters()
 }
 
+// ClickHouseDatasourceInfo returns detailed ClickHouse datasource info.
+func (s *server) ClickHouseDatasourceInfo() []types.DatasourceInfo {
+	if len(s.cfg.ClickHouse) == 0 {
+		return nil
+	}
+
+	result := make([]types.DatasourceInfo, 0, len(s.cfg.ClickHouse))
+	for _, ch := range s.cfg.ClickHouse {
+		info := types.DatasourceInfo{
+			Type:        "clickhouse",
+			Name:        ch.Name,
+			Description: ch.Description,
+		}
+		if ch.Database != "" {
+			info.Metadata = map[string]string{
+				"database": ch.Database,
+			}
+		}
+		result = append(result, info)
+	}
+
+	return result
+}
+
 // PrometheusDatasources returns the list of Prometheus datasource names.
 func (s *server) PrometheusDatasources() []string {
 	if s.prometheusHandler == nil {
@@ -329,6 +360,30 @@ func (s *server) PrometheusDatasources() []string {
 	return s.prometheusHandler.Instances()
 }
 
+// PrometheusDatasourceInfo returns detailed Prometheus datasource info.
+func (s *server) PrometheusDatasourceInfo() []types.DatasourceInfo {
+	if len(s.cfg.Prometheus) == 0 {
+		return nil
+	}
+
+	result := make([]types.DatasourceInfo, 0, len(s.cfg.Prometheus))
+	for _, prom := range s.cfg.Prometheus {
+		info := types.DatasourceInfo{
+			Type:        "prometheus",
+			Name:        prom.Name,
+			Description: prom.Description,
+		}
+		if prom.URL != "" {
+			info.Metadata = map[string]string{
+				"url": prom.URL,
+			}
+		}
+		result = append(result, info)
+	}
+
+	return result
+}
+
 // LokiDatasources returns the list of Loki datasource names.
 func (s *server) LokiDatasources() []string {
 	if s.lokiHandler == nil {
@@ -336,6 +391,30 @@ func (s *server) LokiDatasources() []string {
 	}
 
 	return s.lokiHandler.Instances()
+}
+
+// LokiDatasourceInfo returns detailed Loki datasource info.
+func (s *server) LokiDatasourceInfo() []types.DatasourceInfo {
+	if len(s.cfg.Loki) == 0 {
+		return nil
+	}
+
+	result := make([]types.DatasourceInfo, 0, len(s.cfg.Loki))
+	for _, loki := range s.cfg.Loki {
+		info := types.DatasourceInfo{
+			Type:        "loki",
+			Name:        loki.Name,
+			Description: loki.Description,
+		}
+		if loki.URL != "" {
+			info.Metadata = map[string]string{
+				"url": loki.URL,
+			}
+		}
+		result = append(result, info)
+	}
+
+	return result
 }
 
 // S3Bucket returns the configured S3 bucket name.

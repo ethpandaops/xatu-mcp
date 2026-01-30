@@ -24,6 +24,14 @@ type CartographoorAware interface {
 	SetCartographoorClient(client any)
 }
 
+// ProxyAware is an optional interface that plugins can implement
+// to receive the proxy service for proxy-backed operations.
+// The client parameter is passed as any to avoid circular imports;
+// plugins should type-assert to proxy.Service.
+type ProxyAware interface {
+	SetProxyClient(client any)
+}
+
 // DefaultEnabled is an optional interface that plugins can implement
 // to indicate they should be initialized even without explicit config.
 // This is useful for plugins like dora that work with discovered data

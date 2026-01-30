@@ -55,17 +55,19 @@ type SchemaDiscoveryConfig struct {
 	// RefreshInterval is the duration between schema refresh cycles. Defaults to 15 minutes.
 	RefreshInterval time.Duration `yaml:"refresh_interval,omitempty"`
 
-	// Datasources lists the ClickHouse clusters to discover schemas from.
-	// Each entry references a ClickHouse cluster by name.
+	// Datasources lists the ClickHouse datasources to discover schemas from.
+	// Each entry references a proxy-exposed datasource by name.
+	// If empty, all proxy datasources are used.
 	Datasources []SchemaDiscoveryDatasource `yaml:"datasources"`
 }
 
-// SchemaDiscoveryDatasource maps a ClickHouse cluster name to a logical cluster name for schema discovery.
+// SchemaDiscoveryDatasource maps a proxy datasource name to a logical cluster name for schema discovery.
 type SchemaDiscoveryDatasource struct {
-	// Name references a ClickHouse cluster by its name (from clusters[].name).
+	// Name references a ClickHouse datasource by its proxy name.
 	Name string `yaml:"name"`
 
 	// Cluster is the logical cluster name used in schema resources (e.g., "xatu", "xatu-cbt").
+	// Defaults to Name when empty.
 	Cluster string `yaml:"cluster"`
 }
 

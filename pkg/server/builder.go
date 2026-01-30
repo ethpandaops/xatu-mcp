@@ -71,26 +71,29 @@ func (b *Builder) Build(ctx context.Context) (Service, error) {
 
 	b.log.WithField("backend", sandboxSvc.Name()).Info("Sandbox service started")
 
-	// Start all initialized plugins (e.g., schema discovery).
-	if err := pluginReg.StartAll(ctx); err != nil {
-		_ = sandboxSvc.Stop(ctx)
-
-		return nil, fmt.Errorf("starting plugins: %w", err)
-	}
-
-	b.log.Info("All plugins started")
-
 	// Create and start proxy client.
 	// The proxy server must be running separately. Client discovers datasources on start.
 	proxyClient := b.buildProxy()
 	if err := proxyClient.Start(ctx); err != nil {
-		pluginReg.StopAll(ctx)
 		_ = sandboxSvc.Stop(ctx)
 
 		return nil, fmt.Errorf("starting proxy client: %w", err)
 	}
 
 	b.log.WithField("url", proxyClient.URL()).Info("Proxy client connected")
+
+	// Inject proxy client into plugins that need it (e.g., schema discovery).
+	b.injectProxyClient(pluginReg, proxyClient)
+
+	// Start all initialized plugins (e.g., schema discovery).
+	if err := pluginReg.StartAll(ctx); err != nil {
+		_ = proxyClient.Stop(ctx)
+		_ = sandboxSvc.Stop(ctx)
+
+		return nil, fmt.Errorf("starting plugins: %w", err)
+	}
+
+	b.log.Info("All plugins started")
 
 	// Create cartographoor client for network discovery.
 	cartographoorClient := b.buildCartographoor()
@@ -315,6 +318,19 @@ func (b *Builder) buildCartographoor() resource.CartographoorClient {
 		CacheTTL: resource.DefaultCacheTTL,
 		Timeout:  resource.DefaultHTTPTimeout,
 	})
+}
+
+// injectProxyClient passes the proxy client to plugins that need it.
+func (b *Builder) injectProxyClient(
+	pluginReg *plugin.Registry,
+	client proxy.Service,
+) {
+	for _, p := range pluginReg.Initialized() {
+		if aware, ok := p.(plugin.ProxyAware); ok {
+			aware.SetProxyClient(client)
+			b.log.WithField("plugin", p.Name()).Debug("Injected proxy client into plugin")
+		}
+	}
 }
 
 // injectCartographoorClient passes the cartographoor client to plugins that need it.
