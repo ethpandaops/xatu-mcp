@@ -19,6 +19,10 @@ docker-compose up -d
 
 The server runs on port 2480 (SSE transport, configurable via `MCP_SERVER_PORT`) with MinIO on ports 2400/2401 (configurable via `MINIO_API_PORT`/`MINIO_CONSOLE_PORT`).
 
+## Deployment Modes
+
+See `docs/deployments.md` for dev, local-agent, and remote-agent deployment modes, plus separation-of-concerns notes.
+
 ## Claude Code
 
 Add to `~/.claude.json` under `mcpServers`:

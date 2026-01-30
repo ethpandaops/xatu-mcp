@@ -86,11 +86,6 @@ func (p *Plugin) SandboxEnv() (map[string]string, error) {
 	}, nil
 }
 
-// ProxyConfig returns nil since Dora is public and needs no proxy.
-func (p *Plugin) ProxyConfig() any {
-	return nil
-}
-
 // DatasourceInfo returns empty since networks are the datasources,
 // and those come from cartographoor.
 func (p *Plugin) DatasourceInfo() []types.DatasourceInfo {

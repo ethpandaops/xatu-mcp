@@ -69,11 +69,6 @@ type Plugin interface {
 	// the credential proxy instead.
 	SandboxEnv() (map[string]string, error)
 
-	// ProxyConfig returns configuration for the credential proxy.
-	// The returned value should be a slice of config structs appropriate
-	// for the plugin type (e.g., []handlers.ClickHouseConfig).
-	ProxyConfig() any
-
 	// DatasourceInfo returns metadata about configured datasources
 	// for the datasources:// MCP resource.
 	DatasourceInfo() []types.DatasourceInfo

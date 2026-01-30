@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
-	"strconv"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -13,7 +11,6 @@ import (
 
 	"github.com/ethpandaops/mcp/pkg/plugin"
 	"github.com/ethpandaops/mcp/pkg/proxy"
-	"github.com/ethpandaops/mcp/pkg/proxy/handlers"
 	"github.com/ethpandaops/mcp/pkg/types"
 )
 
@@ -129,68 +126,6 @@ func (p *Plugin) SandboxEnv() (map[string]string, error) {
 	return map[string]string{
 		"ETHPANDAOPS_CLICKHOUSE_DATASOURCES": string(infosJSON),
 	}, nil
-}
-
-// ProxyConfig returns the configuration needed by the credential proxy.
-func (p *Plugin) ProxyConfig() any {
-	if len(p.cfg.Clusters) == 0 {
-		return nil
-	}
-
-	configs := make([]handlers.ClickHouseConfig, 0, len(p.cfg.Clusters))
-
-	for _, cluster := range p.cfg.Clusters {
-		host, port := parseHostPort(cluster.Host, 443)
-
-		configs = append(configs, handlers.ClickHouseConfig{
-			Name:       cluster.Name,
-			Host:       host,
-			Port:       port,
-			Database:   cluster.Database,
-			Username:   cluster.Username,
-			Password:   cluster.Password,
-			Secure:     cluster.IsSecure(),
-			SkipVerify: cluster.SkipVerify,
-			Timeout:    cluster.Timeout,
-		})
-	}
-
-	return configs
-}
-
-// parseHostPort extracts host and port from a host:port string.
-// Handles IPv6 addresses in bracket notation [::1]:port.
-func parseHostPort(hostPort string, defaultPort int) (string, int) {
-	// Handle IPv6 with brackets: [::1]:port
-	if len(hostPort) > 0 && hostPort[0] == '[' {
-		bracketIdx := -1
-		for i, c := range hostPort {
-			if c == ']' {
-				bracketIdx = i
-				break
-			}
-		}
-		if bracketIdx > 0 {
-			host := hostPort[1:bracketIdx]
-			if bracketIdx+1 < len(hostPort) && hostPort[bracketIdx+1] == ':' {
-				portStr := hostPort[bracketIdx+2:]
-				if port, err := strconv.Atoi(portStr); err == nil {
-					return host, port
-				}
-			}
-			return host, defaultPort
-		}
-	}
-
-	// Handle host:port (IPv4 or hostname)
-	re := regexp.MustCompile(`^([^:]+):(\d+)$`)
-	if matches := re.FindStringSubmatch(hostPort); len(matches) == 3 {
-		if port, err := strconv.Atoi(matches[2]); err == nil {
-			return matches[1], port
-		}
-	}
-
-	return hostPort, defaultPort
 }
 
 func (p *Plugin) DatasourceInfo() []types.DatasourceInfo {
