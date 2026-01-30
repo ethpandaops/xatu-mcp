@@ -78,13 +78,16 @@ def _get_datasource_names() -> list[str]:
     return [ds["name"] for ds in _load_datasources()]
 
 
-def _get_client() -> httpx.Client:
-    """Get an HTTP client configured for the proxy."""
+def _get_client(datasource: str) -> httpx.Client:
+    """Get an HTTP client configured for the proxy with the specified datasource."""
     _check_proxy_config()
 
     return httpx.Client(
         base_url=_PROXY_URL,
-        headers={"Authorization": f"Bearer {_PROXY_TOKEN}"},
+        headers={
+            "Authorization": f"Bearer {_PROXY_TOKEN}",
+            "X-Datasource": datasource,
+        },
         timeout=httpx.Timeout(connect=5.0, read=300.0, write=60.0, pool=5.0),
     )
 
@@ -134,14 +137,14 @@ def query(
         )
 
     try:
-        with _get_client() as client:
+        with _get_client(cluster_name) as client:
             params = {"default_format": "TabSeparatedWithNames"}
             if parameters:
                 params.update(_build_query_params(parameters))
 
             # ClickHouse HTTP interface expects POST with query in body.
             response = client.post(
-                f"/clickhouse/{cluster_name}/",
+                "/clickhouse/",
                 content=sql,
                 params=params,
             )

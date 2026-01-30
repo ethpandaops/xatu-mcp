@@ -73,13 +73,16 @@ def _get_datasource_names() -> list[str]:
     return [ds["name"] for ds in _load_datasources()]
 
 
-def _get_client() -> httpx.Client:
-    """Get an HTTP client configured for the proxy."""
+def _get_client(datasource: str) -> httpx.Client:
+    """Get an HTTP client configured for the proxy with the specified datasource."""
     _check_proxy_config()
 
     return httpx.Client(
         base_url=_PROXY_URL,
-        headers={"Authorization": f"Bearer {_PROXY_TOKEN}"},
+        headers={
+            "Authorization": f"Bearer {_PROXY_TOKEN}",
+            "X-Datasource": datasource,
+        },
         timeout=httpx.Timeout(connect=5.0, read=120.0, write=30.0, pool=5.0),
     )
 
@@ -145,8 +148,8 @@ def _query_api(instance_name: str, path: str, params: dict[str, str]) -> dict[st
             f"Unknown instance '{instance_name}'. Available instances: {datasources}"
         )
 
-    with _get_client() as client:
-        response = client.get(f"/prometheus/{instance_name}{path}", params=params)
+    with _get_client(instance_name) as client:
+        response = client.get(f"/prometheus{path}", params=params)
         response.raise_for_status()
 
         data = response.json()

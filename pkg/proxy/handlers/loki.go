@@ -13,6 +13,8 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// Note: DatasourceHeader is defined in clickhouse.go
+
 // LokiConfig holds Loki proxy configuration for a single instance.
 type LokiConfig struct {
 	Name       string
@@ -103,46 +105,47 @@ func (h *LokiHandler) createInstance(cfg LokiConfig) *lokiInstance {
 	}
 }
 
-// ServeHTTP handles requests of the form /loki/{instance}/{path...}
+// ServeHTTP handles Loki requests. The instance is specified via X-Datasource header.
 func (h *LokiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Extract instance name from path.
-	// Path format: /loki/{instance}/... or /loki/{instance}
-	pathParts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/loki/"), "/", 2)
-	if len(pathParts) == 0 || pathParts[0] == "" {
-		http.Error(w, "missing instance name in path", http.StatusBadRequest)
+	// Extract instance name from header.
+	instanceName := r.Header.Get(DatasourceHeader)
+	if instanceName == "" {
+		http.Error(w, fmt.Sprintf("missing %s header", DatasourceHeader), http.StatusBadRequest)
+
 		return
 	}
 
-	instanceName := pathParts[0]
 	instance, ok := h.instances[instanceName]
-
 	if !ok {
 		http.Error(w, fmt.Sprintf("unknown instance: %s", instanceName), http.StatusNotFound)
+
 		return
 	}
 
 	if instance == nil {
 		http.Error(w, fmt.Sprintf("instance %s not properly configured", instanceName), http.StatusInternalServerError)
+
 		return
 	}
 
-	// Rewrite path to remove /loki/{instance} prefix.
-	remainingPath := "/"
-	if len(pathParts) > 1 {
-		remainingPath = "/" + pathParts[1]
+	// Strip /loki prefix from path, keep the rest for the upstream.
+	path := strings.TrimPrefix(r.URL.Path, "/loki")
+	if path == "" {
+		path = "/"
 	}
 
-	r.URL.Path = remainingPath
+	r.URL.Path = path
 
 	if instance.cfg.Timeout > 0 {
 		timeoutCtx, cancel := context.WithTimeout(r.Context(), time.Duration(instance.cfg.Timeout)*time.Second)
 		defer cancel()
+
 		r = r.WithContext(timeoutCtx)
 	}
 
 	h.log.WithFields(logrus.Fields{
 		"instance": instanceName,
-		"path":     remainingPath,
+		"path":     path,
 		"method":   r.Method,
 	}).Debug("Proxying Loki request")
 

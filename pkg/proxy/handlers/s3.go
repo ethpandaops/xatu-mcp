@@ -61,19 +61,23 @@ func NewS3Handler(log logrus.FieldLogger, cfg *S3Config) *S3Handler {
 	}
 }
 
-// ServeHTTP handles requests of the form /s3/{bucket}/{key...}
+// ServeHTTP handles S3 requests. Path format: /s3/{bucket}/{key...}
 // Supports: PUT (upload), GET (download), HEAD (metadata), DELETE
 func (h *S3Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.cfg == nil {
 		http.Error(w, "S3 storage not configured", http.StatusServiceUnavailable)
+
 		return
 	}
 
-	// Extract bucket and key from path.
+	// Strip /s3 prefix and extract bucket and key from the remaining path.
 	// Path format: /s3/{bucket}/{key}
-	pathParts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/s3/"), "/", 2)
+	path := strings.TrimPrefix(r.URL.Path, "/s3/")
+	pathParts := strings.SplitN(path, "/", 2)
+
 	if len(pathParts) == 0 || pathParts[0] == "" {
 		http.Error(w, "missing bucket name in path", http.StatusBadRequest)
+
 		return
 	}
 

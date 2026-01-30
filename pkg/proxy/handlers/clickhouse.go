@@ -14,6 +14,9 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// DatasourceHeader is the HTTP header used to specify which datasource to route to.
+const DatasourceHeader = "X-Datasource"
+
 // ClickHouseConfig holds ClickHouse proxy configuration for a single cluster.
 type ClickHouseConfig struct {
 	Name       string
@@ -120,41 +123,41 @@ func (h *ClickHouseHandler) createCluster(cfg ClickHouseConfig) *clickhouseClust
 	}
 }
 
-// ServeHTTP handles requests of the form /clickhouse/{cluster}/{path...}
+// ServeHTTP handles ClickHouse requests. The cluster is specified via X-Datasource header.
 func (h *ClickHouseHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Extract cluster name from path.
-	// Path format: /clickhouse/{cluster}/... or /clickhouse/{cluster}
-	pathParts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/clickhouse/"), "/", 2)
-	if len(pathParts) == 0 || pathParts[0] == "" {
-		http.Error(w, "missing cluster name in path", http.StatusBadRequest)
+	// Extract cluster name from header.
+	clusterName := r.Header.Get(DatasourceHeader)
+	if clusterName == "" {
+		http.Error(w, fmt.Sprintf("missing %s header", DatasourceHeader), http.StatusBadRequest)
+
 		return
 	}
 
-	clusterName := pathParts[0]
 	cluster, ok := h.clusters[clusterName]
-
 	if !ok {
 		http.Error(w, fmt.Sprintf("unknown cluster: %s", clusterName), http.StatusNotFound)
+
 		return
 	}
 
-	// Rewrite path to remove /clickhouse/{cluster} prefix.
-	remainingPath := "/"
-	if len(pathParts) > 1 {
-		remainingPath = "/" + pathParts[1]
+	// Strip /clickhouse prefix from path, keep the rest for the upstream.
+	path := strings.TrimPrefix(r.URL.Path, "/clickhouse")
+	if path == "" {
+		path = "/"
 	}
 
-	r.URL.Path = remainingPath
+	r.URL.Path = path
 
 	if cluster.cfg.Timeout > 0 {
 		timeoutCtx, cancel := context.WithTimeout(r.Context(), time.Duration(cluster.cfg.Timeout)*time.Second)
 		defer cancel()
+
 		r = r.WithContext(timeoutCtx)
 	}
 
 	h.log.WithFields(logrus.Fields{
 		"cluster": clusterName,
-		"path":    remainingPath,
+		"path":    path,
 		"method":  r.Method,
 	}).Debug("Proxying ClickHouse request")
 
