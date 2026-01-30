@@ -4,11 +4,17 @@ package plugin
 
 import (
 	"context"
+	"errors"
 
 	"github.com/sirupsen/logrus"
 
 	"github.com/ethpandaops/mcp/pkg/types"
 )
+
+// ErrNoValidConfig indicates that a plugin was configured but has no valid
+// entries (e.g., all clusters/instances have empty required fields).
+// This is not an error - the plugin should be skipped gracefully.
+var ErrNoValidConfig = errors.New("no valid configuration entries")
 
 // CartographoorAware is an optional interface that plugins can implement
 // to receive the cartographoor client for network discovery.

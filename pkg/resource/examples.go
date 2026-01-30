@@ -32,7 +32,9 @@ func RegisterExamplesResources(log logrus.FieldLogger, reg Registry, pluginReg *
 
 func createExamplesHandler(pluginReg *plugin.Registry) ReadHandler {
 	return func(_ context.Context, _ string) (string, error) {
-		examples := pluginReg.Examples()
+		// Use AllExamples to include examples from all plugins,
+		// not just initialized ones (examples don't need credentials).
+		examples := pluginReg.AllExamples()
 
 		data, err := json.MarshalIndent(examples, "", "  ")
 		if err != nil {
@@ -43,7 +45,8 @@ func createExamplesHandler(pluginReg *plugin.Registry) ReadHandler {
 	}
 }
 
-// GetQueryExamples returns all query examples from the plugin registry.
+// GetQueryExamples returns all query examples from ALL registered plugins,
+// regardless of initialization status. Examples are static embedded data.
 func GetQueryExamples(pluginReg *plugin.Registry) map[string]types.ExampleCategory {
-	return pluginReg.Examples()
+	return pluginReg.AllExamples()
 }

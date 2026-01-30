@@ -2,6 +2,7 @@ package tool
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -181,7 +182,7 @@ func newExecutePythonHandler(
 		}).Info("Executing Python code")
 
 		// Build credential-free environment variables for the sandbox.
-		env, err := buildSandboxEnv(cfg, pluginReg, proxySvc)
+		env, err := buildSandboxEnv(pluginReg, proxySvc)
 		if err != nil {
 			handlerLog.WithError(err).Error("Failed to build sandbox environment")
 
@@ -312,7 +313,6 @@ func formatSize(bytes int64) string {
 // The proxy URL and datasource info are included, but no credentials.
 // The token is added separately by the caller.
 func buildSandboxEnv(
-	cfg *config.Config,
 	pluginReg *plugin.Registry,
 	proxySvc proxy.Service,
 ) (map[string]string, error) {
@@ -331,10 +331,49 @@ func buildSandboxEnv(
 		env["ETHPANDAOPS_S3_BUCKET"] = bucket
 	}
 
-	// Add public URL prefix for S3 if configured.
-	if cfg.Storage != nil && cfg.Storage.PublicURLPrefix != "" {
-		env["ETHPANDAOPS_S3_PUBLIC_URL_PREFIX"] = cfg.Storage.PublicURLPrefix
+	// Add public URL prefix for S3 if available from proxy.
+	if prefix := proxySvc.S3PublicURLPrefix(); prefix != "" {
+		env["ETHPANDAOPS_S3_PUBLIC_URL_PREFIX"] = prefix
+	}
+
+	// If plugins didn't provide datasource info, get it from proxy.
+	// This happens when plugins aren't initialized (e.g., no local credentials).
+	if _, ok := env["ETHPANDAOPS_CLICKHOUSE_DATASOURCES"]; !ok {
+		if ds := proxySvc.ClickHouseDatasources(); len(ds) > 0 {
+			env["ETHPANDAOPS_CLICKHOUSE_DATASOURCES"] = buildDatasourceJSON(ds)
+		}
+	}
+
+	if _, ok := env["ETHPANDAOPS_PROMETHEUS_DATASOURCES"]; !ok {
+		if ds := proxySvc.PrometheusDatasources(); len(ds) > 0 {
+			env["ETHPANDAOPS_PROMETHEUS_DATASOURCES"] = buildDatasourceJSON(ds)
+		}
+	}
+
+	if _, ok := env["ETHPANDAOPS_LOKI_DATASOURCES"]; !ok {
+		if ds := proxySvc.LokiDatasources(); len(ds) > 0 {
+			env["ETHPANDAOPS_LOKI_DATASOURCES"] = buildDatasourceJSON(ds)
+		}
 	}
 
 	return env, nil
+}
+
+// buildDatasourceJSON creates a JSON array of datasource info objects.
+func buildDatasourceJSON(names []string) string {
+	type dsInfo struct {
+		Name string `json:"name"`
+	}
+
+	infos := make([]dsInfo, len(names))
+	for i, name := range names {
+		infos[i] = dsInfo{Name: name}
+	}
+
+	data, err := json.Marshal(infos)
+	if err != nil {
+		return "[]"
+	}
+
+	return string(data)
 }

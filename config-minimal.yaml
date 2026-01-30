@@ -1,0 +1,29 @@
+# Minimal config for testing the new proxy architecture
+# No plugins configured - datasources discovered from proxy
+
+server:
+  host: "0.0.0.0"
+  port: 2480
+  base_url: "http://localhost:2480"
+
+sandbox:
+  backend: docker
+  image: "ethpandaops-mcp-sandbox:latest"
+  timeout: 600
+  memory_limit: "2g"
+  cpu_limit: 1.0
+  network: "ethpandaops-mcp-internal"
+  host_shared_path: "/tmp/ethpandaops-mcp-sandbox"
+  sessions:
+    max_sessions: 50
+    ttl: 10m
+    max_duration: 1h
+
+proxy:
+  url: "http://ethpandaops-mcp-proxy:18081"
+
+auth:
+  enabled: false
+
+observability:
+  metrics_enabled: true

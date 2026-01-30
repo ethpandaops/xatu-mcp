@@ -1,8 +1,11 @@
 # ethpandaops MCP Server - Docker Compose Configuration
 #
+# Architecture:
+#   1. Proxy service - holds credentials, proxies requests from sandbox containers
+#   2. MCP server - connects to proxy, runs sandbox containers
+#
 # Usage:
 #   docker-compose up -d                        # Start all services
-#   docker-compose up -d ethpandaops-mcp-server # Start just the MCP server
 #   docker-compose logs -f ethpandaops-mcp-server # View server logs
 #
 # Optional environment variables (with defaults):
@@ -24,10 +27,8 @@ services:
     command: "true"
     restart: "no"
 
-  ethpandaops-mcp-server:
-    # NOTE: Semantic search requires x86_64. On ARM Macs, use emulation or the server will fail to start.
-    # Uncomment below for x86 emulation (slower but enables semantic search):
-    # platform: linux/amd64
+  # Credential proxy - holds datasource credentials
+  ethpandaops-mcp-proxy:
     build:
       context: .
       dockerfile: Dockerfile
@@ -35,12 +36,11 @@ services:
         - VERSION=${VERSION:-dev}
         - GIT_COMMIT=${GIT_COMMIT:-unknown}
         - BUILD_TIME=${BUILD_TIME:-unknown}
+    entrypoint: ["/app/proxy"]
+    command: ["--config", "/config/proxy-config.yaml"]
     ports:
-      - "${MCP_SERVER_PORT:-2480}:2480"   # MCP server
-      - "${MCP_METRICS_PORT:-31490}:2490"  # Metrics
-      - "18081:18081"                      # Credential proxy for sandbox containers
+      - "18081:18081"  # Proxy for sandbox containers
     environment:
-      - CONFIG_PATH=/config/config.yaml
       # ClickHouse - Xatu cluster
       - CLICKHOUSE_XATU_HOST=${CLICKHOUSE_XATU_HOST}
       - CLICKHOUSE_XATU_DATABASE=${CLICKHOUSE_XATU_DATABASE}
@@ -68,13 +68,40 @@ services:
       - LOKI_URL=${LOKI_URL}
       - LOKI_USERNAME=${LOKI_USERNAME}
       - LOKI_PASSWORD=${LOKI_PASSWORD}
-      # S3 Storage
-      # S3_ENDPOINT must be reachable from sandbox containers (on mcp-internal network).
-      # Use the Docker service name, not localhost.
+      # S3 Storage - must be reachable from sandbox containers
       - S3_ENDPOINT=http://minio:9000
       - S3_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
       - S3_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
       - S3_PUBLIC_URL=http://localhost:${MINIO_API_PORT:-31400}/ethpandaops-mcp-outputs
+    volumes:
+      - ./proxy-config.yaml:/config/proxy-config.yaml:ro
+    networks:
+      - ethpandaops-mcp-external
+      - ethpandaops-mcp-internal
+    depends_on:
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "18081"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # MCP server - connects to proxy
+  ethpandaops-mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - VERSION=${VERSION:-dev}
+        - GIT_COMMIT=${GIT_COMMIT:-unknown}
+        - BUILD_TIME=${BUILD_TIME:-unknown}
+    ports:
+      - "${MCP_SERVER_PORT:-2480}:2480"   # MCP server
+      - "${MCP_METRICS_PORT:-31490}:2490"  # Metrics
+    environment:
+      - CONFIG_PATH=/config/config.yaml
     volumes:
       - ./config.yaml:/config/config.yaml:ro
       - /var/run/docker.sock:/var/run/docker.sock
@@ -85,6 +112,8 @@ services:
     depends_on:
       sandbox-builder:
         condition: service_completed_successfully
+      ethpandaops-mcp-proxy:
+        condition: service_healthy
       minio:
         condition: service_healthy
     restart: unless-stopped

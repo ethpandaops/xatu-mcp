@@ -40,7 +40,9 @@ func RegisterAPIResources(log logrus.FieldLogger, reg Registry, pluginReg *plugi
 
 func createAPIHandler(pluginReg *plugin.Registry) ReadHandler {
 	return func(_ context.Context, _ string) (string, error) {
-		modules := pluginReg.PythonAPIDocs()
+		// Use AllPythonAPIDocs to include docs from all plugins,
+		// not just initialized ones (API docs don't need credentials).
+		modules := pluginReg.AllPythonAPIDocs()
 
 		// Add platform-owned storage module.
 		modules["storage"] = types.ModuleDoc{

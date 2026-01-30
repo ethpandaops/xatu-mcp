@@ -11,11 +11,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// StandaloneConfig is the configuration for the standalone proxy server.
-// This is used when running the proxy as a separate K8s service.
-type StandaloneConfig struct {
+// ServerConfig is the configuration for the proxy server.
+// This is the single configuration schema used for both local and K8s deployments.
+type ServerConfig struct {
 	// Server holds HTTP server configuration.
-	Server ServerConfig `yaml:"server"`
+	Server HTTPServerConfig `yaml:"server"`
 
 	// Auth holds authentication configuration.
 	Auth AuthConfig `yaml:"auth"`
@@ -39,8 +39,8 @@ type StandaloneConfig struct {
 	Audit AuditConfig `yaml:"audit"`
 }
 
-// ServerConfig holds HTTP server configuration.
-type ServerConfig struct {
+// HTTPServerConfig holds HTTP server configuration.
+type HTTPServerConfig struct {
 	// ListenAddr is the address to listen on (default: ":18081").
 	ListenAddr string `yaml:"listen_addr,omitempty"`
 
@@ -54,7 +54,7 @@ type ServerConfig struct {
 	IdleTimeout time.Duration `yaml:"idle_timeout,omitempty"`
 }
 
-// AuthConfig holds authentication configuration for the standalone proxy.
+// AuthConfig holds authentication configuration for the proxy.
 type AuthConfig struct {
 	// Mode is the authentication mode (token or jwt).
 	Mode AuthMode `yaml:"mode"`
@@ -129,8 +129,8 @@ type AuditConfig struct {
 	MaxQueryLength int `yaml:"max_query_length,omitempty"`
 }
 
-// ApplyDefaults sets default values for the standalone config.
-func (c *StandaloneConfig) ApplyDefaults() {
+// ApplyDefaults sets default values for the server config.
+func (c *ServerConfig) ApplyDefaults() {
 	// Server defaults.
 	if c.Server.ListenAddr == "" {
 		c.Server.ListenAddr = ":18081"
@@ -149,8 +149,9 @@ func (c *StandaloneConfig) ApplyDefaults() {
 	}
 
 	// Auth defaults.
+	// Default to no auth for local development. Production should explicitly set jwt mode.
 	if c.Auth.Mode == "" {
-		c.Auth.Mode = AuthModeJWT
+		c.Auth.Mode = AuthModeNone
 	}
 
 	if c.Auth.TokenTTL == 0 {
@@ -187,8 +188,8 @@ func (c *StandaloneConfig) ApplyDefaults() {
 	}
 }
 
-// Validate validates the standalone config.
-func (c *StandaloneConfig) Validate() error {
+// Validate validates the server config.
+func (c *ServerConfig) Validate() error {
 	if c.Auth.Mode == AuthModeJWT {
 		if c.Auth.JWT == nil {
 			return fmt.Errorf("auth.jwt is required when auth.mode is 'jwt'")
@@ -244,8 +245,8 @@ func (c *StandaloneConfig) Validate() error {
 	return nil
 }
 
-// ToHandlerConfigs converts the standalone config to handler configs.
-func (c *StandaloneConfig) ToHandlerConfigs() ([]handlers.ClickHouseConfig, []handlers.PrometheusConfig, []handlers.LokiConfig, *handlers.S3Config) {
+// ToHandlerConfigs converts the server config to handler configs.
+func (c *ServerConfig) ToHandlerConfigs() ([]handlers.ClickHouseConfig, []handlers.PrometheusConfig, []handlers.LokiConfig, *handlers.S3Config) {
 	// Convert ClickHouse configs.
 	chConfigs := make([]handlers.ClickHouseConfig, len(c.ClickHouse))
 	for i, ch := range c.ClickHouse {
@@ -303,8 +304,8 @@ func (c *StandaloneConfig) ToHandlerConfigs() ([]handlers.ClickHouseConfig, []ha
 // envVarPattern matches ${VAR_NAME} patterns for environment variable substitution.
 var envVarPattern = regexp.MustCompile(`\$\{([^}]+)\}`)
 
-// LoadStandaloneConfig loads a standalone proxy config from a YAML file.
-func LoadStandaloneConfig(path string) (*StandaloneConfig, error) {
+// LoadServerConfig loads a proxy server config from a YAML file.
+func LoadServerConfig(path string) (*ServerConfig, error) {
 	if path == "" {
 		path = os.Getenv("CONFIG_PATH")
 		if path == "" {
@@ -323,7 +324,7 @@ func LoadStandaloneConfig(path string) (*StandaloneConfig, error) {
 		return nil, fmt.Errorf("substituting env vars: %w", err)
 	}
 
-	var cfg StandaloneConfig
+	var cfg ServerConfig
 	if err := yaml.Unmarshal([]byte(substituted), &cfg); err != nil {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}

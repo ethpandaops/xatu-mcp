@@ -34,9 +34,29 @@ const gettingStartedHeader = `# Getting Started Guide
 const gettingStartedFooter = `
 ## Sessions
 
-- **Reuse session_id** from tool responses for faster execution and file persistence
-- Files in ` + "`/workspace/`" + ` persist across calls; Python variables do NOT
-- Use ` + "`storage.upload()`" + ` for permanent URLs (see ` + "`python://ethpandaops`" + ` for API details)
+**IMPORTANT:** Each ` + "`execute_python`" + ` call runs in a **fresh Python process**. Variables do NOT persist between calls.
+
+- **Files persist**: Save to ` + "`/workspace/`" + ` to share data between executions
+- **Variables do NOT persist**: ` + "`df`" + ` from one call won't exist in the next
+- **Reuse session_id**: Pass it from tool responses for file persistence and faster startup
+
+**Example - Multi-step workflow:**
+` + "```python" + `
+# Call 1: Query and SAVE to workspace
+df = clickhouse.query("xatu-cbt", "SELECT ...")
+df.to_parquet("/workspace/data.parquet")  # Persist!
+` + "```" + `
+
+` + "```python" + `
+# Call 2: LOAD from workspace and plot
+import pandas as pd
+df = pd.read_parquet("/workspace/data.parquet")  # Load!
+plt.plot(df["time"], df["value"])
+plt.savefig("/workspace/chart.png")
+url = storage.upload("/workspace/chart.png")
+` + "```" + `
+
+Use ` + "`storage.upload()`" + ` for permanent public URLs (see ` + "`python://ethpandaops`" + ` for API details).
 `
 
 // RegisterGettingStartedResources registers the mcp://getting-started

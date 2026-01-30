@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -12,7 +13,6 @@ import (
 	"github.com/ethpandaops/mcp/pkg/embedding"
 	"github.com/ethpandaops/mcp/pkg/plugin"
 	"github.com/ethpandaops/mcp/pkg/proxy"
-	"github.com/ethpandaops/mcp/pkg/proxy/handlers"
 	"github.com/ethpandaops/mcp/pkg/resource"
 	"github.com/ethpandaops/mcp/pkg/sandbox"
 	"github.com/ethpandaops/mcp/pkg/tool"
@@ -80,24 +80,24 @@ func (b *Builder) Build(ctx context.Context) (Service, error) {
 
 	b.log.Info("All plugins started")
 
-	// Create and start credential proxy service.
-	// Proxy is always enabled - sandbox containers never receive credentials directly.
-	proxySvc := b.buildProxy(pluginReg)
-	if err := proxySvc.Start(ctx); err != nil {
+	// Create and start proxy client.
+	// The proxy server must be running separately. Client discovers datasources on start.
+	proxyClient := b.buildProxy()
+	if err := proxyClient.Start(ctx); err != nil {
 		pluginReg.StopAll(ctx)
 		_ = sandboxSvc.Stop(ctx)
 
-		return nil, fmt.Errorf("starting proxy: %w", err)
+		return nil, fmt.Errorf("starting proxy client: %w", err)
 	}
 
-	b.log.WithField("url", proxySvc.URL()).Info("Credential proxy started")
+	b.log.WithField("url", proxyClient.URL()).Info("Proxy client connected")
 
 	// Create cartographoor client for network discovery.
 	cartographoorClient := b.buildCartographoor()
 
 	// Start the cartographoor client to fetch initial network data.
 	if err := cartographoorClient.Start(ctx); err != nil {
-		_ = proxySvc.Stop(ctx)
+		_ = proxyClient.Stop(ctx)
 		pluginReg.StopAll(ctx)
 		_ = sandboxSvc.Stop(ctx)
 
@@ -113,7 +113,7 @@ func (b *Builder) Build(ctx context.Context) (Service, error) {
 	authSvc, err := b.buildAuth()
 	if err != nil {
 		_ = cartographoorClient.Stop()
-		_ = proxySvc.Stop(ctx)
+		_ = proxyClient.Stop(ctx)
 		pluginReg.StopAll(ctx)
 		_ = sandboxSvc.Stop(ctx)
 
@@ -123,7 +123,7 @@ func (b *Builder) Build(ctx context.Context) (Service, error) {
 	// Start the auth service.
 	if err := authSvc.Start(ctx); err != nil {
 		_ = cartographoorClient.Stop()
-		_ = proxySvc.Stop(ctx)
+		_ = proxyClient.Stop(ctx)
 		pluginReg.StopAll(ctx)
 		_ = sandboxSvc.Stop(ctx)
 
@@ -139,7 +139,7 @@ func (b *Builder) Build(ctx context.Context) (Service, error) {
 	if err != nil {
 		_ = authSvc.Stop()
 		_ = cartographoorClient.Stop()
-		_ = proxySvc.Stop(ctx)
+		_ = proxyClient.Stop(ctx)
 		pluginReg.StopAll(ctx)
 		_ = sandboxSvc.Stop(ctx)
 
@@ -161,7 +161,7 @@ func (b *Builder) Build(ctx context.Context) (Service, error) {
 
 		_ = authSvc.Stop()
 		_ = cartographoorClient.Stop()
-		_ = proxySvc.Stop(ctx)
+		_ = proxyClient.Stop(ctx)
 		pluginReg.StopAll(ctx)
 		_ = sandboxSvc.Stop(ctx)
 
@@ -173,10 +173,10 @@ func (b *Builder) Build(ctx context.Context) (Service, error) {
 	}
 
 	// Create tool registry and register tools.
-	toolReg := b.buildToolRegistry(sandboxSvc, exampleIndex, pluginReg, proxySvc, runbookReg, runbookIndex)
+	toolReg := b.buildToolRegistry(sandboxSvc, exampleIndex, pluginReg, proxyClient, runbookReg, runbookIndex)
 
 	// Create resource registry and register resources.
-	resourceReg := b.buildResourceRegistry(cartographoorClient, pluginReg, toolReg)
+	resourceReg := b.buildResourceRegistry(cartographoorClient, pluginReg, toolReg, proxyClient)
 
 	// Create and return the server service.
 	return NewService(
@@ -214,6 +214,13 @@ func (b *Builder) buildPluginRegistry() (*plugin.Registry, error) {
 			if de, ok := p.(plugin.DefaultEnabled); ok && de.DefaultEnabled() {
 				// Initialize with empty config.
 				if err := reg.InitPlugin(name, nil); err != nil {
+					// Skip if no valid config (e.g., env vars not set).
+					if errors.Is(err, plugin.ErrNoValidConfig) {
+						b.log.WithField("plugin", name).Debug("Default-enabled plugin has no valid config, skipping")
+
+						continue
+					}
+
 					return nil, fmt.Errorf("initializing default-enabled plugin %q: %w", name, err)
 				}
 
@@ -226,6 +233,13 @@ func (b *Builder) buildPluginRegistry() (*plugin.Registry, error) {
 		}
 
 		if err := reg.InitPlugin(name, rawYAML); err != nil {
+			// Skip if no valid config (e.g., env vars not set).
+			if errors.Is(err, plugin.ErrNoValidConfig) {
+				b.log.WithField("plugin", name).Debug("Plugin has no valid config entries, skipping")
+
+				continue
+			}
+
 			return nil, fmt.Errorf("initializing plugin %q: %w", name, err)
 		}
 	}
@@ -245,98 +259,21 @@ func (b *Builder) buildAuth() (auth.SimpleService, error) {
 	return auth.NewSimpleService(b.log, b.cfg.Auth, b.cfg.Server.BaseURL)
 }
 
-// buildProxy creates the credential proxy service.
-// Returns either a local proxy (runs in-process) or a remote proxy adapter
-// (connects to a K8s-hosted proxy).
-func (b *Builder) buildProxy(pluginReg *plugin.Registry) proxy.Service {
-	// Check if remote proxy is configured.
-	if b.cfg.Proxy.IsRemote() {
-		remoteSvc := proxy.NewRemote(b.log, proxy.RemoteConfig{
-			URL:       b.cfg.Proxy.Remote.URL,
-			IssuerURL: b.cfg.Proxy.Remote.IssuerURL,
-			ClientID:  b.cfg.Proxy.Remote.ClientID,
-		})
-
-		// Set datasource names from plugin configs.
-		// The remote proxy needs to know datasource names for environment variables.
-		var chNames, promNames, lokiNames []string
-
-		for _, p := range pluginReg.Initialized() {
-			cfg := p.ProxyConfig()
-			if cfg == nil {
-				continue
-			}
-
-			switch c := cfg.(type) {
-			case []handlers.ClickHouseConfig:
-				for _, ch := range c {
-					chNames = append(chNames, ch.Name)
-				}
-			case []handlers.PrometheusConfig:
-				for _, prom := range c {
-					promNames = append(promNames, prom.Name)
-				}
-			case []handlers.LokiConfig:
-				for _, loki := range c {
-					lokiNames = append(lokiNames, loki.Name)
-				}
-			}
-		}
-
-		s3Bucket := ""
-		if b.cfg.Storage != nil {
-			s3Bucket = b.cfg.Storage.Bucket
-		}
-
-		// Type assertion to set datasources (RemoteService has this method).
-		if setter, ok := remoteSvc.(interface {
-			SetDatasources(ch, prom, loki []string, s3Bucket string)
-		}); ok {
-			setter.SetDatasources(chNames, promNames, lokiNames, s3Bucket)
-		}
-
-		return remoteSvc
+// buildProxy creates the proxy client.
+// The proxy server must be running separately (via `mcp proxy` or K8s deployment).
+// Datasources are discovered from the proxy's /datasources endpoint.
+func (b *Builder) buildProxy() proxy.Client {
+	cfg := proxy.ClientConfig{
+		URL: b.cfg.Proxy.URL,
 	}
 
-	// Build local proxy.
-	opts := proxy.Options{
-		Config: proxy.Config{
-			ListenAddr:  b.cfg.Proxy.ListenAddr,
-			TokenTTL:    b.cfg.Proxy.TokenTTL,
-			SandboxHost: b.cfg.Proxy.SandboxHost,
-		},
+	// Add auth config if provided.
+	if b.cfg.Proxy.Auth != nil {
+		cfg.IssuerURL = b.cfg.Proxy.Auth.IssuerURL
+		cfg.ClientID = b.cfg.Proxy.Auth.ClientID
 	}
 
-	// Collect proxy configs from all plugins.
-	for _, p := range pluginReg.Initialized() {
-		cfg := p.ProxyConfig()
-		if cfg == nil {
-			continue
-		}
-
-		switch c := cfg.(type) {
-		case []handlers.ClickHouseConfig:
-			opts.ClickHouse = c
-		case []handlers.PrometheusConfig:
-			opts.Prometheus = c
-		case []handlers.LokiConfig:
-			opts.Loki = c
-		}
-	}
-
-	// Add S3 config from storage config.
-	if b.cfg.Storage != nil {
-		opts.S3 = &handlers.S3Config{
-			Endpoint:        b.cfg.Storage.Endpoint,
-			AccessKey:       b.cfg.Storage.AccessKey,
-			SecretKey:       b.cfg.Storage.SecretKey,
-			Bucket:          b.cfg.Storage.Bucket,
-			Region:          b.cfg.Storage.Region,
-			PublicURLPrefix: b.cfg.Storage.PublicURLPrefix,
-		}
-	}
-
-	return proxy.New(b.log, opts)
+	return proxy.NewClient(b.log, cfg)
 }
 
 // buildToolRegistry creates and populates the tool registry.
@@ -344,14 +281,14 @@ func (b *Builder) buildToolRegistry(
 	sandboxSvc sandbox.Service,
 	exampleIndex *resource.ExampleIndex,
 	pluginReg *plugin.Registry,
-	proxySvc proxy.Service,
+	proxyClient proxy.Service,
 	runbookReg *runbooks.Registry,
 	runbookIndex *resource.RunbookIndex,
 ) tool.Registry {
 	reg := tool.NewRegistry(b.log)
 
 	// Register execute_python tool.
-	reg.Register(tool.NewExecutePythonTool(b.log, sandboxSvc, b.cfg, pluginReg, proxySvc))
+	reg.Register(tool.NewExecutePythonTool(b.log, sandboxSvc, b.cfg, pluginReg, proxyClient))
 
 	// Register manage_session tool.
 	reg.Register(tool.NewManageSessionTool(b.log, sandboxSvc))
@@ -395,7 +332,6 @@ func (b *Builder) injectCartographoorClient(
 
 // buildExampleIndex creates the semantic search index for examples
 // and returns the shared embedder.
-// Returns nil if semantic search is disabled or model is not available.
 func (b *Builder) buildExampleIndex(pluginReg *plugin.Registry) (*resource.ExampleIndex, *embedding.Embedder, error) {
 	cfg := b.cfg.SemanticSearch
 	if cfg.ModelPath == "" {
@@ -455,11 +391,12 @@ func (b *Builder) buildResourceRegistry(
 	cartographoorClient resource.CartographoorClient,
 	pluginReg *plugin.Registry,
 	toolReg tool.Registry,
+	proxyClient proxy.Client,
 ) resource.Registry {
 	reg := resource.NewRegistry(b.log)
 
-	// Register datasources resources (from plugin registry).
-	resource.RegisterDatasourcesResources(b.log, reg, pluginReg)
+	// Register datasources resources (from plugin registry and proxy client).
+	resource.RegisterDatasourcesResources(b.log, reg, pluginReg, proxyClient)
 
 	// Register examples resources (from plugin registry).
 	resource.RegisterExamplesResources(b.log, reg, pluginReg)

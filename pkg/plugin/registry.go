@@ -41,6 +41,8 @@ func (r *Registry) Add(p Plugin) {
 
 // InitPlugin initializes a plugin with the given raw YAML config.
 // It calls Init, ApplyDefaults, and Validate in sequence.
+// Returns ErrNoValidConfig if the plugin has no valid configuration entries,
+// which should be handled by the caller as a graceful skip.
 func (r *Registry) InitPlugin(name string, rawConfig []byte) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -185,6 +187,22 @@ func (r *Registry) Examples() map[string]types.ExampleCategory {
 	return result
 }
 
+// AllExamples aggregates query examples from ALL registered plugins,
+// regardless of initialization status. Examples are static embedded data
+// that don't require credentials.
+func (r *Registry) AllExamples() map[string]types.ExampleCategory {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make(map[string]types.ExampleCategory, 16)
+
+	for _, p := range r.all {
+		maps.Copy(result, p.Examples())
+	}
+
+	return result
+}
+
 // PythonAPIDocs aggregates Python API docs from all initialized plugins.
 func (r *Registry) PythonAPIDocs() map[string]types.ModuleDoc {
 	r.mu.RLock()
@@ -195,6 +213,21 @@ func (r *Registry) PythonAPIDocs() map[string]types.ModuleDoc {
 	result := make(map[string]types.ModuleDoc, 8)
 
 	for _, p := range plugins {
+		maps.Copy(result, p.PythonAPIDocs())
+	}
+
+	return result
+}
+
+// AllPythonAPIDocs aggregates Python API docs from ALL registered plugins,
+// regardless of initialization status. API docs are static embedded data.
+func (r *Registry) AllPythonAPIDocs() map[string]types.ModuleDoc {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make(map[string]types.ModuleDoc, 8)
+
+	for _, p := range r.all {
 		maps.Copy(result, p.PythonAPIDocs())
 	}
 

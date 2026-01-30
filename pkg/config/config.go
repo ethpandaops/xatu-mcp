@@ -111,45 +111,27 @@ type ObservabilityConfig struct {
 	MetricsPort    int  `yaml:"metrics_port"`
 }
 
-// ProxyConfig holds credential proxy configuration.
-// The proxy is always enabled - sandbox containers never receive credentials directly.
+// ProxyConfig holds proxy connection configuration.
+// The MCP server always connects to a proxy server (local or remote) via this config.
+// Sandbox containers never receive credentials directly.
 type ProxyConfig struct {
-	// ListenAddr is the address for the proxy to listen on (default: ":18081").
-	// Ignored when Remote.URL is set.
-	ListenAddr string `yaml:"listen_addr,omitempty"`
-
-	// TokenTTL is the duration a per-execution token is valid for (default: 1h).
-	// Ignored when Remote.URL is set.
-	TokenTTL time.Duration `yaml:"token_ttl,omitempty"`
-
-	// SandboxHost is the hostname/IP that sandbox containers should use to reach the proxy.
-	// Defaults to "host.docker.internal". Ignored when Remote.URL is set.
-	SandboxHost string `yaml:"sandbox_host,omitempty"`
-
-	// Remote configures a remote proxy for use with Kubernetes deployments.
-	// When set, the local proxy is not started and the user's JWT is used for auth.
-	Remote *RemoteProxyConfig `yaml:"remote,omitempty"`
-}
-
-// RemoteProxyConfig configures a remote proxy endpoint.
-type RemoteProxyConfig struct {
-	// URL is the base URL of the remote proxy (e.g., https://proxy.ethpandaops.io).
+	// URL is the base URL of the proxy server (e.g., http://localhost:18081).
+	// Required - the proxy must be running separately.
 	URL string `yaml:"url"`
 
-	// IssuerURL is the OIDC issuer URL for authentication (e.g., https://dex.ethpandaops.io).
+	// Auth configures authentication for the proxy.
+	// Optional - if not set, the proxy must allow unauthenticated access.
+	Auth *ProxyAuthConfig `yaml:"auth,omitempty"`
+}
+
+// ProxyAuthConfig configures authentication for the proxy.
+type ProxyAuthConfig struct {
+	// IssuerURL is the OIDC issuer URL for JWT authentication.
 	IssuerURL string `yaml:"issuer_url"`
 
 	// ClientID is the OAuth client ID for authentication.
 	ClientID string `yaml:"client_id"`
 }
-
-// IsRemote returns true if a remote proxy is configured.
-func (c *ProxyConfig) IsRemote() bool {
-	return c.Remote != nil && c.Remote.URL != ""
-}
-
-// envVarPattern matches ${VAR_NAME} patterns for environment variable substitution.
-var envVarPattern = regexp.MustCompile(`\$\{([^}]+)\}`)
 
 // Load loads configuration from a YAML file with environment variable substitution.
 func Load(path string) (*Config, error) {
@@ -202,11 +184,13 @@ func (c *Config) PluginConfigYAML(name string) ([]byte, error) {
 	return data, nil
 }
 
-// substituteEnvVars replaces ${VAR_NAME} patterns with environment variable values.
-// Lines that are comments (starting with #) are skipped to allow commented optional sections
-// in config files without requiring their environment variables to be set.
+// envVarWithDefaultPattern matches ${VAR_NAME:-default} patterns.
+var envVarWithDefaultPattern = regexp.MustCompile(`\$\{([^}:]+)(?::-([^}]*))?\}`)
+
+// substituteEnvVars replaces ${VAR_NAME} and ${VAR_NAME:-default} patterns with environment variable values.
+// Lines that are comments (starting with #) are skipped.
+// Missing environment variables without defaults are replaced with empty strings (lenient mode).
 func substituteEnvVars(content string) (string, error) {
-	var missingVars []string
 	lines := strings.Split(content, "\n")
 
 	for i, line := range lines {
@@ -216,20 +200,21 @@ func substituteEnvVars(content string) (string, error) {
 			continue
 		}
 
-		lines[i] = envVarPattern.ReplaceAllStringFunc(line, func(match string) string {
-			varName := envVarPattern.FindStringSubmatch(match)[1]
+		lines[i] = envVarWithDefaultPattern.ReplaceAllStringFunc(line, func(match string) string {
+			parts := envVarWithDefaultPattern.FindStringSubmatch(match)
+			varName := parts[1]
+			defaultVal := ""
+			if len(parts) > 2 {
+				defaultVal = parts[2]
+			}
+
 			value := os.Getenv(varName)
 			if value == "" {
-				missingVars = append(missingVars, varName)
-				return match
+				return defaultVal // Use default or empty string
 			}
 
 			return value
 		})
-	}
-
-	if len(missingVars) > 0 {
-		return "", fmt.Errorf("missing environment variables: %v", missingVars)
 	}
 
 	return strings.Join(lines, "\n"), nil
@@ -283,16 +268,8 @@ func applyDefaults(cfg *Config) {
 	}
 
 	// Proxy defaults.
-	if cfg.Proxy.ListenAddr == "" {
-		cfg.Proxy.ListenAddr = ":18081"
-	}
-
-	if cfg.Proxy.TokenTTL == 0 {
-		cfg.Proxy.TokenTTL = 1 * time.Hour
-	}
-
-	if cfg.Proxy.SandboxHost == "" {
-		cfg.Proxy.SandboxHost = "host.docker.internal"
+	if cfg.Proxy.URL == "" {
+		cfg.Proxy.URL = "http://localhost:18081"
 	}
 
 	// Semantic search defaults.

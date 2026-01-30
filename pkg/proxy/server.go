@@ -14,8 +14,9 @@ import (
 	"github.com/ethpandaops/mcp/pkg/proxy/handlers"
 )
 
-// StandaloneService is the standalone credential proxy service for K8s deployment.
-type StandaloneService interface {
+// Server is the credential proxy server interface.
+// This is the standalone proxy server that runs separately from the MCP server.
+type Server interface {
 	// Start starts the proxy server.
 	Start(ctx context.Context) error
 
@@ -38,12 +39,12 @@ type StandaloneService interface {
 	S3Bucket() string
 }
 
-// standaloneService implements the StandaloneService interface.
-type standaloneService struct {
-	log    logrus.FieldLogger
-	cfg    StandaloneConfig
-	server *http.Server
-	mux    *http.ServeMux
+// server implements the Server interface.
+type server struct {
+	log     logrus.FieldLogger
+	cfg     ServerConfig
+	httpSrv *http.Server
+	mux     *http.ServeMux
 
 	authenticator Authenticator
 	rateLimiter   *RateLimiter
@@ -59,11 +60,11 @@ type standaloneService struct {
 }
 
 // Compile-time interface check.
-var _ StandaloneService = (*standaloneService)(nil)
+var _ Server = (*server)(nil)
 
-// NewStandalone creates a new standalone proxy service.
-func NewStandalone(log logrus.FieldLogger, cfg StandaloneConfig) (StandaloneService, error) {
-	s := &standaloneService{
+// NewServer creates a new proxy server.
+func NewServer(log logrus.FieldLogger, cfg ServerConfig) (Server, error) {
+	s := &server{
 		log: log.WithField("component", "proxy"),
 		cfg: cfg,
 		mux: http.NewServeMux(),
@@ -71,6 +72,8 @@ func NewStandalone(log logrus.FieldLogger, cfg StandaloneConfig) (StandaloneServ
 
 	// Create authenticator based on mode.
 	switch cfg.Auth.Mode {
+	case AuthModeNone:
+		s.authenticator = NewNoneAuthenticator(log)
 	case AuthModeToken:
 		tokens := NewTokenStore(cfg.Auth.TokenTTL)
 		s.authenticator = NewTokenAuthenticator(log, tokens)
@@ -127,7 +130,7 @@ func NewStandalone(log logrus.FieldLogger, cfg StandaloneConfig) (StandaloneServ
 }
 
 // registerRoutes sets up the HTTP routes.
-func (s *standaloneService) registerRoutes() {
+func (s *server) registerRoutes() {
 	// Health check endpoint (no auth required).
 	s.mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -149,7 +152,7 @@ func (s *standaloneService) registerRoutes() {
 		}
 	})
 
-	// Datasources info endpoint (for Python modules to discover available datasources).
+	// Datasources info endpoint (for discovery by MCP server and Python modules).
 	s.mux.HandleFunc("/datasources", s.handleDatasources)
 
 	// Build middleware chain.
@@ -174,7 +177,7 @@ func (s *standaloneService) registerRoutes() {
 }
 
 // buildMiddlewareChain builds the middleware chain for authenticated routes.
-func (s *standaloneService) buildMiddlewareChain() func(http.Handler) http.Handler {
+func (s *server) buildMiddlewareChain() func(http.Handler) http.Handler {
 	return func(handler http.Handler) http.Handler {
 		h := handler
 
@@ -195,18 +198,24 @@ func (s *standaloneService) buildMiddlewareChain() func(http.Handler) http.Handl
 	}
 }
 
+// DatasourcesResponse is the response from the /datasources endpoint.
+// This is used by the MCP server client to discover available datasources.
+type DatasourcesResponse struct {
+	ClickHouse        []string `json:"clickhouse"`
+	Prometheus        []string `json:"prometheus"`
+	Loki              []string `json:"loki"`
+	S3Bucket          string   `json:"s3_bucket,omitempty"`
+	S3PublicURLPrefix string   `json:"s3_public_url_prefix,omitempty"`
+}
+
 // handleDatasources returns the list of available datasources.
-func (s *standaloneService) handleDatasources(w http.ResponseWriter, _ *http.Request) {
-	info := struct {
-		ClickHouse []string `json:"clickhouse"`
-		Prometheus []string `json:"prometheus"`
-		Loki       []string `json:"loki"`
-		S3Bucket   string   `json:"s3_bucket,omitempty"`
-	}{
-		ClickHouse: s.ClickHouseDatasources(),
-		Prometheus: s.PrometheusDatasources(),
-		Loki:       s.LokiDatasources(),
-		S3Bucket:   s.S3Bucket(),
+func (s *server) handleDatasources(w http.ResponseWriter, _ *http.Request) {
+	info := DatasourcesResponse{
+		ClickHouse:        s.ClickHouseDatasources(),
+		Prometheus:        s.PrometheusDatasources(),
+		Loki:              s.LokiDatasources(),
+		S3Bucket:          s.S3Bucket(),
+		S3PublicURLPrefix: s.S3PublicURLPrefix(),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -217,7 +226,7 @@ func (s *standaloneService) handleDatasources(w http.ResponseWriter, _ *http.Req
 }
 
 // Start starts the proxy server.
-func (s *standaloneService) Start(ctx context.Context) error {
+func (s *server) Start(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -236,7 +245,7 @@ func (s *standaloneService) Start(ctx context.Context) error {
 		return fmt.Errorf("binding to %s: %w", s.cfg.Server.ListenAddr, err)
 	}
 
-	s.server = &http.Server{
+	s.httpSrv = &http.Server{
 		Handler:           s.mux,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       s.cfg.Server.ReadTimeout,
@@ -245,11 +254,11 @@ func (s *standaloneService) Start(ctx context.Context) error {
 		BaseContext:       func(_ net.Listener) context.Context { return ctx },
 	}
 
-	s.log.WithField("addr", s.cfg.Server.ListenAddr).Info("Starting standalone proxy server")
+	s.log.WithField("addr", s.cfg.Server.ListenAddr).Info("Starting proxy server")
 
 	// Start server in background with the already-bound listener.
 	go func() {
-		if err := s.server.Serve(listener); err != nil && err != http.ErrServerClosed {
+		if err := s.httpSrv.Serve(listener); err != nil && err != http.ErrServerClosed {
 			s.log.WithError(err).Error("Proxy server error")
 		}
 	}()
@@ -260,7 +269,7 @@ func (s *standaloneService) Start(ctx context.Context) error {
 }
 
 // Stop stops the proxy server.
-func (s *standaloneService) Stop(ctx context.Context) error {
+func (s *server) Stop(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -279,20 +288,20 @@ func (s *standaloneService) Stop(ctx context.Context) error {
 	}
 
 	// Shutdown HTTP server.
-	if s.server != nil {
-		if err := s.server.Shutdown(ctx); err != nil {
+	if s.httpSrv != nil {
+		if err := s.httpSrv.Shutdown(ctx); err != nil {
 			return fmt.Errorf("shutting down proxy server: %w", err)
 		}
 	}
 
 	s.started = false
-	s.log.Info("Standalone proxy server stopped")
+	s.log.Info("Proxy server stopped")
 
 	return nil
 }
 
 // URL returns the proxy URL.
-func (s *standaloneService) URL() string {
+func (s *server) URL() string {
 	// Extract port from listen address.
 	port := "18081"
 	if _, p, err := net.SplitHostPort(s.cfg.Server.ListenAddr); err == nil && p != "" {
@@ -303,7 +312,7 @@ func (s *standaloneService) URL() string {
 }
 
 // ClickHouseDatasources returns the list of ClickHouse datasource names.
-func (s *standaloneService) ClickHouseDatasources() []string {
+func (s *server) ClickHouseDatasources() []string {
 	if s.clickhouseHandler == nil {
 		return nil
 	}
@@ -312,7 +321,7 @@ func (s *standaloneService) ClickHouseDatasources() []string {
 }
 
 // PrometheusDatasources returns the list of Prometheus datasource names.
-func (s *standaloneService) PrometheusDatasources() []string {
+func (s *server) PrometheusDatasources() []string {
 	if s.prometheusHandler == nil {
 		return nil
 	}
@@ -321,7 +330,7 @@ func (s *standaloneService) PrometheusDatasources() []string {
 }
 
 // LokiDatasources returns the list of Loki datasource names.
-func (s *standaloneService) LokiDatasources() []string {
+func (s *server) LokiDatasources() []string {
 	if s.lokiHandler == nil {
 		return nil
 	}
@@ -330,10 +339,19 @@ func (s *standaloneService) LokiDatasources() []string {
 }
 
 // S3Bucket returns the configured S3 bucket name.
-func (s *standaloneService) S3Bucket() string {
+func (s *server) S3Bucket() string {
 	if s.s3Handler == nil {
 		return ""
 	}
 
 	return s.s3Handler.Bucket()
+}
+
+// S3PublicURLPrefix returns the public URL prefix for S3 objects.
+func (s *server) S3PublicURLPrefix() string {
+	if s.s3Handler == nil {
+		return ""
+	}
+
+	return s.s3Handler.PublicURLPrefix()
 }

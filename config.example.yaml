@@ -162,22 +162,18 @@ auth:
   # tokens:
   #   secret_key: "${JWT_SECRET_KEY}"  # Required when auth is enabled
 
-# Credential proxy configuration (optional)
-# The credential proxy runs automatically to protect datasource credentials.
-# Sandbox containers never receive credentials directly - they connect via the proxy.
-# proxy:
-#   listen_addr: ":18081"  # Address for proxy to listen on
-#   token_ttl: 1h          # How long per-execution tokens are valid
-#   sandbox_host: "host.docker.internal"  # Hostname/IP for sandbox containers to reach proxy
-#
-#   # Remote proxy configuration (for K8s deployments)
-#   # When set, the local proxy is not started. Instead, the MCP server connects
-#   # to a remote proxy and uses the user's JWT for authentication.
-#   # Users must run 'mcp auth login' first to obtain a JWT.
-#   # remote:
-#   #   url: "https://proxy.ethpandaops.io"       # Remote proxy URL
-#   #   issuer_url: "https://dex.ethpandaops.io" # OIDC issuer for authentication
-#   #   client_id: "ethpandaops-mcp"             # OAuth client ID
+# Proxy connection configuration
+# The MCP server connects to a separate proxy server that holds datasource credentials.
+# Start the proxy first: mcp proxy -c proxy-config.yaml
+# Or connect to a remote K8s-hosted proxy.
+proxy:
+  url: "http://localhost:18081"  # Proxy server URL (default)
+
+  # Auth configuration (optional, for K8s deployments with JWT auth)
+  # Users must run 'mcp auth login' first to obtain a JWT.
+  # auth:
+  #   issuer_url: "https://dex.ethpandaops.io"
+  #   client_id: "ethpandaops-mcp"
 
 # Observability configuration
 observability:

@@ -12,6 +12,9 @@ import (
 type AuthMode string
 
 const (
+	// AuthModeNone disables authentication (for local development only).
+	AuthModeNone AuthMode = "none"
+
 	// AuthModeToken uses local per-execution tokens (for embedded proxy in MCP server).
 	AuthModeToken AuthMode = "token"
 
@@ -29,6 +32,42 @@ type Authenticator interface {
 
 	// Stop stops any background processes.
 	Stop() error
+}
+
+// noneAuthenticator allows all requests without authentication.
+// This is for local development only.
+type noneAuthenticator struct {
+	log logrus.FieldLogger
+}
+
+// Compile-time interface check.
+var _ Authenticator = (*noneAuthenticator)(nil)
+
+// NewNoneAuthenticator creates an authenticator that allows all requests.
+func NewNoneAuthenticator(log logrus.FieldLogger) Authenticator {
+	return &noneAuthenticator{
+		log: log.WithField("auth_mode", "none"),
+	}
+}
+
+func (a *noneAuthenticator) Start(_ context.Context) error {
+	a.log.Warn("Authentication is DISABLED - this should only be used for local development")
+
+	return nil
+}
+
+func (a *noneAuthenticator) Stop() error {
+	return nil
+}
+
+func (a *noneAuthenticator) Middleware() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// No authentication - allow all requests.
+			ctx := context.WithValue(r.Context(), userIDKey, "anonymous")
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
 }
 
 // tokenAuthenticator uses local per-execution tokens.
@@ -169,10 +208,14 @@ func (a *jwtAuthenticator) Middleware() func(http.Handler) http.Handler {
 	}
 }
 
+// contextKey is the type for context keys used in the proxy package.
+type contextKey string
+
 // Context keys for authenticated request data.
 const (
-	userIDKey    contextKey = "user_id"
-	jwtClaimsKey contextKey = "jwt_claims"
+	executionIDKey contextKey = "execution_id"
+	userIDKey      contextKey = "user_id"
+	jwtClaimsKey   contextKey = "jwt_claims"
 )
 
 // GetUserID extracts the user ID from the request context.

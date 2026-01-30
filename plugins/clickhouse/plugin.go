@@ -32,7 +32,43 @@ func New() *Plugin {
 func (p *Plugin) Name() string { return "clickhouse" }
 
 func (p *Plugin) Init(rawConfig []byte) error {
-	return yaml.Unmarshal(rawConfig, &p.cfg)
+	if err := yaml.Unmarshal(rawConfig, &p.cfg); err != nil {
+		return err
+	}
+
+	// Filter out clusters with empty required fields (e.g., missing env vars).
+	validClusters := make([]ClusterConfig, 0, len(p.cfg.Clusters))
+
+	for _, c := range p.cfg.Clusters {
+		if c.Name != "" && c.Host != "" && c.Database != "" && c.Username != "" && c.Password != "" {
+			validClusters = append(validClusters, c)
+		}
+	}
+
+	p.cfg.Clusters = validClusters
+
+	// If no valid clusters remain, signal that this plugin should be skipped.
+	if len(p.cfg.Clusters) == 0 {
+		return plugin.ErrNoValidConfig
+	}
+
+	// Filter schema discovery datasources to only reference valid clusters.
+	clusterNames := make(map[string]struct{}, len(p.cfg.Clusters))
+	for _, c := range p.cfg.Clusters {
+		clusterNames[c.Name] = struct{}{}
+	}
+
+	validDatasources := make([]SchemaDiscoveryDatasource, 0, len(p.cfg.SchemaDiscovery.Datasources))
+
+	for _, ds := range p.cfg.SchemaDiscovery.Datasources {
+		if _, exists := clusterNames[ds.Name]; exists && ds.Cluster != "" {
+			validDatasources = append(validDatasources, ds)
+		}
+	}
+
+	p.cfg.SchemaDiscovery.Datasources = validDatasources
+
+	return nil
 }
 
 func (p *Plugin) ApplyDefaults() {

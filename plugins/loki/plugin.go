@@ -22,7 +22,27 @@ func New() *Plugin { return &Plugin{} }
 func (p *Plugin) Name() string { return "loki" }
 
 func (p *Plugin) Init(rawConfig []byte) error {
-	return yaml.Unmarshal(rawConfig, &p.cfg)
+	if err := yaml.Unmarshal(rawConfig, &p.cfg); err != nil {
+		return err
+	}
+
+	// Filter out instances with empty required fields (e.g., missing env vars).
+	validInstances := make([]InstanceConfig, 0, len(p.cfg.Instances))
+
+	for _, inst := range p.cfg.Instances {
+		if inst.Name != "" && inst.URL != "" {
+			validInstances = append(validInstances, inst)
+		}
+	}
+
+	p.cfg.Instances = validInstances
+
+	// If no valid instances remain, signal that this plugin should be skipped.
+	if len(p.cfg.Instances) == 0 {
+		return plugin.ErrNoValidConfig
+	}
+
+	return nil
 }
 
 func (p *Plugin) ApplyDefaults() {

@@ -203,3 +203,8 @@ func (h *S3Handler) Bucket() string {
 
 	return h.cfg.Bucket
 }
+
+// PublicURLPrefix returns the public URL prefix for S3 objects.
+func (h *S3Handler) PublicURLPrefix() string {
+	return h.publicURLPrefix
+}

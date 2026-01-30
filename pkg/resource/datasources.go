@@ -9,12 +9,67 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/ethpandaops/mcp/pkg/plugin"
+	"github.com/ethpandaops/mcp/pkg/proxy"
 	"github.com/ethpandaops/mcp/pkg/types"
 )
 
-// DatasourcesResponse is the JSON response for datasources resources.
-type DatasourcesResponse struct {
+// DatasourcesJSONResponse is the JSON response for datasources resources.
+type DatasourcesJSONResponse struct {
 	Datasources []types.DatasourceInfo `json:"datasources"`
+}
+
+// DatasourceProvider provides datasource information from either plugins or proxy.
+type DatasourceProvider struct {
+	pluginReg   *plugin.Registry
+	proxyClient proxy.Client
+}
+
+// NewDatasourceProvider creates a new datasource provider.
+func NewDatasourceProvider(pluginReg *plugin.Registry, proxyClient proxy.Client) *DatasourceProvider {
+	return &DatasourceProvider{
+		pluginReg:   pluginReg,
+		proxyClient: proxyClient,
+	}
+}
+
+// DatasourceInfo returns datasource info, preferring proxy data if plugins are empty.
+func (p *DatasourceProvider) DatasourceInfo() []types.DatasourceInfo {
+	// First try plugins.
+	infos := p.pluginReg.DatasourceInfo()
+	if len(infos) > 0 {
+		return infos
+	}
+
+	// Fall back to proxy client if available.
+	if p.proxyClient == nil {
+		return nil
+	}
+
+	// Build datasource info from proxy client.
+	var result []types.DatasourceInfo
+
+	for _, name := range p.proxyClient.ClickHouseDatasources() {
+		result = append(result, types.DatasourceInfo{
+			Type: "clickhouse",
+			Name: name,
+		})
+	}
+
+	for _, name := range p.proxyClient.PrometheusDatasources() {
+		result = append(result, types.DatasourceInfo{
+			Type: "prometheus",
+			Name: name,
+		})
+	}
+
+	for _, name := range p.proxyClient.LokiDatasources() {
+		result = append(result, types.DatasourceInfo{
+			Type: "loki",
+			Name: name,
+		})
+	}
+
+	return result
 }
 
 // RegisterDatasourcesResources registers the datasources:// resources
@@ -23,8 +78,10 @@ func RegisterDatasourcesResources(
 	log logrus.FieldLogger,
 	reg Registry,
 	pluginReg *plugin.Registry,
+	proxyClient proxy.Client,
 ) {
 	log = log.WithField("resource", "datasources")
+	provider := NewDatasourceProvider(pluginReg, proxyClient)
 
 	// datasources://list - all datasources
 	reg.RegisterStatic(StaticResource{
@@ -35,7 +92,7 @@ func RegisterDatasourcesResources(
 			mcp.WithMIMEType("application/json"),
 			mcp.WithAnnotations([]mcp.Role{mcp.RoleAssistant}, 0.8),
 		),
-		Handler: createDatasourcesHandler(pluginReg, ""),
+		Handler: createDatasourcesHandler(provider, ""),
 	})
 
 	// datasources://clickhouse
@@ -47,7 +104,7 @@ func RegisterDatasourcesResources(
 			mcp.WithMIMEType("application/json"),
 			mcp.WithAnnotations([]mcp.Role{mcp.RoleAssistant}, 0.7),
 		),
-		Handler: createDatasourcesHandler(pluginReg, "clickhouse"),
+		Handler: createDatasourcesHandler(provider, "clickhouse"),
 	})
 
 	// datasources://prometheus
@@ -59,7 +116,7 @@ func RegisterDatasourcesResources(
 			mcp.WithMIMEType("application/json"),
 			mcp.WithAnnotations([]mcp.Role{mcp.RoleAssistant}, 0.7),
 		),
-		Handler: createDatasourcesHandler(pluginReg, "prometheus"),
+		Handler: createDatasourcesHandler(provider, "prometheus"),
 	})
 
 	// datasources://loki
@@ -71,15 +128,15 @@ func RegisterDatasourcesResources(
 			mcp.WithMIMEType("application/json"),
 			mcp.WithAnnotations([]mcp.Role{mcp.RoleAssistant}, 0.7),
 		),
-		Handler: createDatasourcesHandler(pluginReg, "loki"),
+		Handler: createDatasourcesHandler(provider, "loki"),
 	})
 
 	log.Debug("Registered datasources resources")
 }
 
-func createDatasourcesHandler(pluginReg *plugin.Registry, filterType string) ReadHandler {
+func createDatasourcesHandler(provider *DatasourceProvider, filterType string) ReadHandler {
 	return func(_ context.Context, _ string) (string, error) {
-		allInfos := pluginReg.DatasourceInfo()
+		allInfos := provider.DatasourceInfo()
 
 		var filtered []types.DatasourceInfo
 		if filterType == "" {
@@ -97,7 +154,7 @@ func createDatasourcesHandler(pluginReg *plugin.Registry, filterType string) Rea
 			}
 		}
 
-		response := DatasourcesResponse{Datasources: filtered}
+		response := DatasourcesJSONResponse{Datasources: filtered}
 
 		data, err := json.MarshalIndent(response, "", "  ")
 		if err != nil {

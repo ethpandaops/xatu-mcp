@@ -59,13 +59,13 @@ func runServe(_ *cobra.Command, _ []string) error {
 	log.WithField("version", version.Version).Info("Starting ethpandaops credential proxy")
 
 	// Load configuration.
-	cfg, err := proxy.LoadStandaloneConfig(cfgFile)
+	cfg, err := proxy.LoadServerConfig(cfgFile)
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	// Create the standalone proxy service.
-	svc, err := proxy.NewStandalone(log, *cfg)
+	// Create the proxy server.
+	svc, err := proxy.NewServer(log, *cfg)
 	if err != nil {
 		return fmt.Errorf("creating proxy: %w", err)
 	}
