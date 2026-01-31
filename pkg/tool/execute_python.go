@@ -174,13 +174,17 @@ func newExecutePythonHandler(
 		// Generate a unique execution tracking ID for token management.
 		executionTrackingID := uuid.New().String()
 
-		handlerLog.WithFields(logrus.Fields{
+		requestFields := logrus.Fields{
 			"code_length": len(code),
 			"timeout":     timeout,
 			"backend":     sandboxSvc.Name(),
 			"session_id":  sessionID,
 			"owner_id":    ownerID,
-		}).Info("Executing Python code")
+		}
+		if cfg.Sandbox.Logging.LogCode {
+			requestFields["code"] = code
+		}
+		handlerLog.WithFields(requestFields).Info("Executing Python code")
 
 		// Build credential-free environment variables for the sandbox.
 		env, err := buildSandboxEnv(pluginReg, proxySvc)
@@ -235,13 +239,18 @@ func newExecutePythonHandler(
 			response += resourceTipMessage
 		}
 
-		handlerLog.WithFields(logrus.Fields{
+		completionFields := logrus.Fields{
 			"execution_id": result.ExecutionID,
 			"exit_code":    result.ExitCode,
 			"duration":     result.DurationSeconds,
 			"output_files": result.OutputFiles,
 			"session_id":   result.SessionID,
-		}).Info("Execution completed")
+		}
+		if cfg.Sandbox.Logging.LogOutput {
+			completionFields["stdout"] = result.Stdout
+			completionFields["stderr"] = result.Stderr
+		}
+		handlerLog.WithFields(completionFields).Info("Execution completed")
 
 		return CallToolSuccess(response), nil
 	}

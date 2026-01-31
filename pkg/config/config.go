@@ -72,6 +72,20 @@ type SandboxConfig struct {
 
 	// Session configuration for persistent execution environments.
 	Sessions SessionConfig `yaml:"sessions"`
+
+	// Logging configuration for sandbox executions.
+	Logging SandboxLoggingConfig `yaml:"logging"`
+}
+
+// SandboxLoggingConfig holds logging configuration for sandbox executions.
+type SandboxLoggingConfig struct {
+	// LogCode logs the full Python code submitted to execute_python.
+	// Disabled by default as code may contain sensitive data.
+	LogCode bool `yaml:"log_code"`
+
+	// LogOutput logs stdout and stderr from execution.
+	// Disabled by default as output may be large or contain sensitive data.
+	LogOutput bool `yaml:"log_output"`
 }
 
 // SessionConfig holds configuration for persistent sandbox sessions.
