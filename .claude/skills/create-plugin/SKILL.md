@@ -1,6 +1,8 @@
 ---
 name: create-plugin
 description: "Add a new datasource plugin to ethpandaops/mcp. Triggers on: add plugin, new plugin, create plugin, add datasource."
+argument-hint: <plugin-name>
+disable-model-invocation: true
 ---
 
 # Create New Plugin
