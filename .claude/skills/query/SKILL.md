@@ -197,74 +197,6 @@ manage_session(operation="create")   # Pre-create a session
 manage_session(operation="destroy", session_id="...")  # Free a session
 ```
 
-## Common Query Patterns
-
-### Block Timing Analysis
-
-```python
-# Average block arrival time
-df = clickhouse.query("xatu-cbt", """
-    SELECT
-        avg(seen_slot_start_diff) as avg_ms,
-        quantile(0.50)(seen_slot_start_diff) as p50_ms,
-        quantile(0.95)(seen_slot_start_diff) as p95_ms
-    FROM mainnet.fct_block_first_seen_by_node
-    WHERE slot_start_date_time >= now() - INTERVAL 1 HOUR
-""")
-```
-
-### Attestation Participation
-
-```python
-# Epoch participation rates
-df = clickhouse.query("xatu-cbt", """
-    SELECT
-        slot,
-        target_participation_rate,
-        source_participation_rate,
-        head_participation_rate
-    FROM mainnet.fct_epoch_participation
-    WHERE slot_start_date_time >= now() - INTERVAL 6 HOUR
-    ORDER BY slot DESC
-""")
-```
-
-### Validator Performance
-
-```python
-# Blocks per client
-df = clickhouse.query("xatu-cbt", """
-    SELECT
-        meta_client_name,
-        count(*) as block_count
-    FROM mainnet.fct_block_first_seen_by_node
-    WHERE slot_start_date_time >= now() - INTERVAL 24 HOUR
-    GROUP BY meta_client_name
-    ORDER BY block_count DESC
-""")
-```
-
-### Network Health Check
-
-```python
-from ethpandaops import dora, clickhouse
-
-# Get current status from Dora
-overview = dora.get_network_overview("mainnet")
-print(f"Epoch: {overview['current_epoch']}, Finalized: {overview.get('finalized_epoch')}")
-
-# Get recent blocks from Xatu
-df = clickhouse.query("xatu", """
-    SELECT slot, block_root, proposer_index
-    FROM beacon_api_eth_v1_events_block
-    WHERE meta_network_name = 'mainnet'
-    ORDER BY slot DESC
-    LIMIT 10
-""")
-for _, row in df.iterrows():
-    print(f"Slot {row['slot']}: proposer {row['proposer_index']}")
-```
-
 ## Error Handling
 
 ClickHouse errors include actionable suggestions:
@@ -284,3 +216,4 @@ Default execution timeout is 60s, max 600s. For large analyses:
 - Check `python://ethpandaops` resource for complete API documentation
 - Use `search_examples` before writing complex queries from scratch
 - Upload visualizations with `storage.upload()` for shareable URLs
+- NEVER just copy/paste/recite base64 of images. You MUST save the image to the workspace and upload it to give it back to the user.
