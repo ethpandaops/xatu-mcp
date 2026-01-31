@@ -20,6 +20,7 @@ coverage.html
 
 # Config files with secrets
 config.yaml
+proxy-config.yaml
 .env
 .envrc
 
